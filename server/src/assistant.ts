@@ -59,7 +59,7 @@ export function planWithRules(utterance: string): AssistantPlan {
 
   if (tv && /(day|recap|reel|highlights?)/i.test(u) && !/\bwhen\b/i.test(u)) return plan([{ name: 'play_on_tv', arguments: { target: 'day_reel' } }]);
   if (/\bwhen\b|show me|find|did (she|biscuit)/i.test(u)) {
-    const query = u.replace(/^(alexa,?\s*)?(show me|find|play)\s*/i, '').replace(/\s*on the (tv|television)\s*$/i, '');
+    const query = u.replace(/^(show me|find|play)\s*/i, '').replace(/\s*on the (tv|television)\s*$/i, '');
     const calls: PlannedCall[] = [{ name: 'find_moment', arguments: { query } }];
     if (tv) calls.push({ name: 'play_on_tv', arguments: { target: 'moment', event_id: '$first_moment' } });
     return plan(calls);

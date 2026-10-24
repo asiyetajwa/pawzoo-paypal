@@ -5,7 +5,7 @@ import type { PetEvent, State } from './types.js';
 import { ingestEvent, type AgentNotice } from './agent.js';
 import { Clock, localParts, zonedToUtc } from './time.js';
 import { DAY_SCRIPT, ESCAPE_SCRIPT, TIME_ZONE, eventFromScript, initialState, type ScenarioEvent } from './seed.js';
-import { RingClient, eventFromLiveWebhook, signRingBody, verifyRingSignature, webhookFor, type RingWebhook } from './ring.js';
+import { eventFromLiveWebhook, signCameraBody, verifyCameraSignature, webhookFor, type CameraWebhook } from './camera.js';
 import { FileStore, type Store } from './store.js';
 
 export type Push =
@@ -18,18 +18,17 @@ export type Push =
 export interface RuntimeOptions {
   store: Store;
   mediaDir: string;
-  ringSecret: string;
+  cameraSecret: string;
   demoDate?: string;
 }
 
 export class Runtime {
   readonly clock = new Clock();
   readonly bus = new EventEmitter();
-  readonly ring = RingClient.fromEnv();
   readonly demoDate: string;
   private state: State | null = null;
   private queue: Promise<unknown> = Promise.resolve();
-  /** Recorded moments by webhook request id: replay's stand-in for Ring's classification and clip APIs. */
+  /** Recorded moments by webhook request id: replay's stand-in for a camera's own classification and clips. */
   private recordings = new Map<string, PetEvent>();
 
   constructor(private readonly opts: RuntimeOptions) {
@@ -72,11 +71,11 @@ export class Runtime {
   /** Why the configured store was abandoned, shown in the simulator so a fallback is never silent. */
   storeError: string | null = null;
 
-  /** DynamoDB trouble (credentials, region, table name) must not take the demo down: switch to a local file and say so. */
+  /** A store that fails must not take the demo down: switch to a fresh local file and say so. */
   private fallBackToFile(err: unknown): void {
     const e = err as Error;
     this.storeError = `${e.name}: ${e.message}`;
-    console.error(`[store] ${this.opts.store.kind} failed (${this.storeError}). Using a local file instead. Run "npm run check:aws" to see why.`);
+    console.error(`[store] ${this.opts.store.kind} failed (${this.storeError}). Using a local file instead.`);
     this.opts.store = new FileStore(process.env.PAWZOO_STATE_FILE ?? 'data/state.json');
   }
 
@@ -113,19 +112,17 @@ export class Runtime {
     this.bus.emit('push', p);
   }
 
-  // ---------- Ring webhooks (live and replay share this path) ----------
+  // ---------- Camera webhooks (live and replay share this path) ----------
 
-  async handleRingWebhook(rawBody: Buffer, signature: string | undefined): Promise<{ status: number; body: unknown }> {
-    if (!verifyRingSignature(rawBody, signature, this.opts.ringSecret)) {
+  async handleCameraWebhook(rawBody: Buffer, signature: string | undefined): Promise<{ status: number; body: unknown }> {
+    if (!verifyCameraSignature(rawBody, signature, this.opts.cameraSecret)) {
       return { status: 401, body: { error: 'Bad signature' } };
     }
-    const hook = JSON.parse(rawBody.toString('utf8')) as RingWebhook;
-    if (hook.data.type !== 'motion_detected' && hook.data.type !== 'button_press') {
-      return { status: 202, body: { ignored: hook.data.type } };
-    }
-    const recorded = this.recordings.get(hook.meta.request_id);
-    const event = recorded ?? (await eventFromLiveWebhook(hook, this.ring, this.opts.mediaDir));
-    if (!event) return { status: 202, body: { ignored: 'no person or animal' } };
+    const hook = JSON.parse(rawBody.toString('utf8')) as CameraWebhook;
+    if (hook.trigger !== 'motion' && hook.trigger !== 'doorbell') return { status: 202, body: { ignored: hook.trigger } };
+    const recorded = this.recordings.get(hook.request_id);
+    const event = recorded ?? eventFromLiveWebhook(hook);
+    if (!event) return { status: 202, body: { ignored: 'no person or animal, or an unknown camera' } };
     const notices = await this.withState((s) => ingestEvent(s, event));
     notices.forEach((n) => this.push(n));
     if (notices.some((n) => n.type === 'alert')) this.push({ type: 'cast', target: 'alert', eventId: event.id });
@@ -135,9 +132,9 @@ export class Runtime {
   private async replay(script: ScenarioEvent): Promise<void> {
     const event = eventFromScript(script, this.demoDate, TIME_ZONE);
     const hook = webhookFor(event);
-    this.recordings.set(hook.meta.request_id, event);
+    this.recordings.set(hook.request_id, event);
     const raw = Buffer.from(JSON.stringify(hook));
-    await this.handleRingWebhook(raw, signRingBody(raw, this.opts.ringSecret));
+    await this.handleCameraWebhook(raw, signCameraBody(raw, this.opts.cameraSecret));
   }
 
   /** Replays every recorded moment of the demo day up to the clock. */

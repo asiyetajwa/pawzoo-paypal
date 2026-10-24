@@ -1,4 +1,4 @@
-// Pawzoo HTTP entry: the MCP endpoint, the Ring webhook, live pushes for the TV and the Alexa+ simulator,
+// Pawzoo HTTP entry: the MCP endpoint, the camera webhook, PayPal's return pages, live pushes for the TV and the simulator,
 // demo controls, and static media.
 
 import './env.js';
@@ -25,17 +25,17 @@ const mediaDir = process.env.PAWZOO_MEDIA_DIR ?? join(root, 'media');
 const webDir = join(root, 'web', 'dist');
 const cardHtml = join(root, 'server', 'dist-views', 'card.html');
 
-const ringSecret = process.env.RING_WEBHOOK_SECRET ?? 'pawzoo-replay-signing-key';
-if (!process.env.RING_WEBHOOK_SECRET) console.warn('[ring] RING_WEBHOOK_SECRET not set: only replay webhooks will verify.');
+const cameraSecret = process.env.CAMERA_WEBHOOK_SECRET ?? 'pawzoo-replay-signing-key';
+if (!process.env.CAMERA_WEBHOOK_SECRET) console.warn('[camera] CAMERA_WEBHOOK_SECRET not set: only replay webhooks will verify.');
 
-export const rt = new Runtime({ store: storeFromEnv(), mediaDir, ringSecret, demoDate: process.env.PAWZOO_DEMO_DATE });
+export const rt = new Runtime({ store: storeFromEnv(), mediaDir, cameraSecret, demoDate: process.env.PAWZOO_DEMO_DATE });
 
 export const app = express();
 app.disable('x-powered-by');
 
-// Ring signs the raw bytes, so this route must see them before any JSON parsing.
-app.post('/ring/webhook', express.raw({ type: '*/*', limit: '256kb' }), async (req, res) => {
-  const result = await rt.handleRingWebhook(req.body as Buffer, req.header('x-signature'));
+// The signature covers the raw bytes, so this route must see them before any JSON parsing.
+app.post('/camera/webhook', express.raw({ type: '*/*', limit: '256kb' }), async (req, res) => {
+  const result = await rt.handleCameraWebhook(req.body as Buffer, req.header('x-signature'));
   res.status(result.status).json(result.body);
 });
 
@@ -90,7 +90,7 @@ app.post('/paypal/stand-in/approve', express.urlencoded({ extended: false }), (r
   res.redirect(`/paypal/return?token=${encodeURIComponent(orderId)}`);
 });
 
-// Live pushes (server-sent events) for the Fire TV app and the Alexa+ simulator.
+// Live pushes (server-sent events) for the TV view and the simulator.
 app.get('/api/stream', (req, res) => {
   res.writeHead(200, {
     'content-type': 'text/event-stream',
@@ -136,7 +136,7 @@ app.get('/api/status', (_req, res) => {
     model: claudeModel(),
     spentUsd: spentUsd(),
     paypal: paypal.mode,
-    ring: rt.ring ? 'live' : 'replay',
+    cameras: process.env.CAMERA_WEBHOOK_SECRET ? 'live webhooks and replay' : 'replay',
     voice: voice.enabled ? { provider: 'elevenlabs', voiceId: voice.voiceId, modelId: voice.modelId } : null,
   });
 });
@@ -162,7 +162,7 @@ app.post('/api/voice', async (req, res) => {
   }
 });
 
-// The assistant brain behind the Alexa+ simulator: turns an utterance into tool calls.
+// The assistant brain behind the simulator: turns an utterance into tool calls.
 app.post('/api/assistant', async (req, res) => {
   const body = req.body as { utterance?: string; tools?: unknown; history?: unknown };
   if (!body.utterance) {
@@ -172,7 +172,7 @@ app.post('/api/assistant', async (req, res) => {
   res.json(await assistantTurn(body.utterance, body.tools, body.history));
 });
 
-// Demo controls for presenters and judges. They drive the replayed Ring day, never real devices.
+// Demo controls for presenters and judges. They drive the replayed camera day, never real devices.
 app.post('/api/demo/time', async (req, res) => {
   const time = (req.body as { time?: string }).time;
   if (!time || !/^\d{2}:\d{2}$/.test(time)) {
@@ -222,7 +222,7 @@ async function startClock(): Promise<void> {
 }
 
 const port = Number(process.env.PORT ?? 8787);
-// --lan (npm run start:tv) listens on the network so a Fire TV or phone on the same Wi-Fi can connect.
+// --lan (npm run start:tv) listens on the network so a TV or phone on the same Wi-Fi can open the TV view.
 const lan = process.argv.includes('--lan');
 const host = lan ? '0.0.0.0' : (process.env.HOST ?? '127.0.0.1');
 
@@ -249,8 +249,8 @@ if (process.env.PAWZOO_NO_LISTEN !== '1') {
       const addresses = lanAddresses();
       console.log(
         addresses.length
-          ? `Fire TV app: open Connect and type ${addresses.map((a) => `${a}:${String(port)}`).join(' or ')}`
-          : 'Fire TV app: no network address found. Is this computer on Wi-Fi?',
+          ? `TV view: open ${addresses.map((a) => `http://${a}:${String(port)}/tv.html`).join(' or ')}`
+          : 'TV view: no network address found. Is this computer on Wi-Fi?',
       );
     }
   });

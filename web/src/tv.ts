@@ -1,4 +1,4 @@
-// TV preview: the same experience as the Fire TV app, in a browser, for development and demos.
+// The TV view: the day reel, moments and alerts on the big screen, in a browser.
 // Plays the day reel, jumps to moments the family asks for, and takes over the screen for alerts.
 
 type Any = Record<string, any>;
@@ -116,7 +116,7 @@ async function showHome(): Promise<void> {
   $<HTMLButtonElement>('#play').focus();
 }
 
-/** Alerts dismissed on this screen only; Alexa+ "she's back inside" clears them everywhere. */
+/** Alerts dismissed on this screen only; telling the assistant "she's back inside" clears them everywhere. */
 const dismissed = new Set<string>();
 $('#dismiss').addEventListener('click', async () => {
   const day = await (await fetch('/api/day')).json();

@@ -13,7 +13,7 @@ export type AgentNotice =
 
 // ---------- Ingest ----------
 
-/** Adds a Ring event and derives walks, meals and alerts from it. Returns what changed, for live pushes. */
+/** Adds a camera event and derives walks, meals and alerts from it. Returns what changed, for live pushes. */
 export function ingestEvent(state: State, event: PetEvent): AgentNotice[] {
   if (state.events.some((e) => e.id === event.id)) return [];
   state.events.push(event);

@@ -481,7 +481,7 @@ function listen(): void {
       const e = p.event;
       $('#events').insertAdjacentHTML(
         'afterbegin',
-        `<li><span>${new Date(e.at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Chicago' })}</span> <b>${esc(e.ringType)}</b> ${esc(e.subjects.join('+'))} &middot; ${esc(e.cameraId)} &rarr; <i>${esc(e.tag)}</i></li>`,
+        `<li><span>${new Date(e.at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Chicago' })}</span> <b>${esc(e.trigger)}</b> ${esc(e.subjects.join('+'))} &middot; ${esc(e.cameraId)} &rarr; <i>${esc(e.tag)}</i></li>`,
       );
     }
     if (p.type === 'paypal') {
@@ -537,8 +537,8 @@ async function boot(): Promise<void> {
     );
   } else {
     const status = (await statusRes.json()) as Any;
-    const state = status.store === 'dynamodb' ? 'Amazon DynamoDB' : status.storeError ? `local file (DynamoDB failed: ${esc(status.storeError)})` : 'local file';
-    session.insertAdjacentHTML('beforeend', `<dt>State</dt><dd${status.storeError ? ' class="warn"' : ''}>${state}</dd><dt>Ring</dt><dd>${status.ring === 'live' ? 'live account' : 'replay'}</dd>`);
+    const state = status.storeError ? `local file (store failed: ${esc(status.storeError)})` : 'local file';
+    session.insertAdjacentHTML('beforeend', `<dt>State</dt><dd${status.storeError ? ' class="warn"' : ''}>${state}</dd><dt>Cameras</dt><dd>${esc(status.cameras ?? 'replay')}</dd><dt>PayPal</dt><dd>${status.paypal === 'sandbox' ? 'sandbox, Agent Toolkit' : 'offline stand-in'}</dd>`);
     if (!status.model) $('#brain').textContent = 'rules (Claude off: no ANTHROPIC_API_KEY)';
     voiceOn = Boolean(status.voice);
     session.insertAdjacentHTML('beforeend', `<dt>Voice</dt><dd>${status.voice ? 'ElevenLabs' : 'off (set ELEVENLABS_API_KEY)'}</dd>`);

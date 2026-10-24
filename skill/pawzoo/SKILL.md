@@ -1,11 +1,11 @@
 ---
 name: pawzoo
-description: Answer questions about the family dog's day and take care of it (food, walker, grooming) using the Pawzoo MCP server, which reads the household's Ring cameras. Use when someone asks how the dog is, what the dog did, whether to order dog food, to pay or tip the dog walker, to book grooming or a vet check-up, or to show the dog's day on the TV.
+description: Answer questions about the family dog's day and take care of it (food, walker, grooming) using the Pawzoo MCP server, which reads the household's home cameras and pays with PayPal only after the owner approves. Use when someone asks how the dog is, what the dog did, whether to order dog food, to pay or tip the dog walker, for receipts, to book grooming or a vet check-up, or to show the dog's day on the TV.
 ---
 
 # Pawzoo
 
-Pawzoo is an MCP server (Streamable HTTP, spec 2025-11-25) that turns Ring camera events into a dog's day and acts on it. Connect to its `/mcp` endpoint. Every tool returns a `say` line for speaking aloud and, for most tools, an MCP Apps card (`ui://pawzoo/card.html`).
+Pawzoo is an MCP server (Streamable HTTP, spec 2025-11-25) that turns home camera events into a dog's day and acts on it, paying with PayPal. Connect to its `/mcp` endpoint. Every tool returns a `say` line for speaking aloud and, for most tools, an MCP Apps card (`ui://pawzoo/card.html`).
 
 ## How to answer
 
@@ -21,20 +21,24 @@ Pawzoo is an MCP server (Streamable HTTP, spec 2025-11-25) that turns Ring camer
 | "Book grooming" | `find_care_slots` with `service: "grooming"` |
 | "Is she OK?" | `get_alerts` |
 | "She's back inside" | `resolve_alert` |
+| "Show me her receipts", "What did we spend?" | `order_receipt` |
 
 Speak the `say` field as it is. It already contains the numbers the person needs.
 
-## Money and bookings: always two steps
+## Money: Pawzoo never pays on its own
 
-1. Call the `quote_` tool (`quote_food_order`, `quote_walk_payment`, `quote_booking`). It returns a `confirmation_id` and buys, pays or books nothing.
-2. Read the quote out. Call `confirm_action` with that `confirmation_id` **only after the person clearly says yes to that quote**. A confirmation works once; if it has expired, quote again.
+1. Quote first: `propose_reorder` (food, with an optional `tip_usd` for the delivery driver) or `quote_walk_payment` (with an optional tip for the walker). It returns a `confirmation_id` and the exact lines, and buys nothing.
+2. Read the quote out. **Only after the person clearly says yes to that quote**, call `create_paypal_order` with that `confirmation_id`. It creates a PayPal order for exactly those lines and returns PayPal's approval link. No money moves.
+3. The person approves that total on PayPal. Only then call `capture_paypal_order` with the order id. Pawzoo checks with PayPal that the order is APPROVED for exactly the quoted total before capturing, and writes an itemized receipt with the PayPal transaction id.
 
-Never call `confirm_action` on your own initiative, on a vague answer, or for a quote the person has not heard.
+Never call `create_paypal_order` on a vague answer or for a quote the person has not heard, and never call `capture_paypal_order` before they say they approved it.
+
+Bookings (`quote_booking`) are paid at the visit: confirm them with `confirm_action` after a yes.
 
 ## Things Pawzoo does not do
 
 - No medical or veterinary advice. If someone describes symptoms, say Pawzoo can't help with that and offer `find_care_slots` with `service: "vet_checkup"`.
-- No identifying people from video. Pawzoo knows "a person" and "an animal" from Ring's motion classes, and who is booked (the walker) from the family's own schedule.
+- No identifying people from video. Pawzoo knows "a person" and "an animal" from the cameras' motion classes, and who is booked (the walker) from the family's own schedule.
 
 ## Proactive alerts
 

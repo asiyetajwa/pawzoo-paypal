@@ -1,21 +1,18 @@
 {
   "name": "@pawzoo/server",
   "version": "1.0.0",
-  "description": "Pawzoo: Alexa+ MCP server, Ring webhooks and Fire TV feed",
+  "description": "Pawzoo: the MCP server, camera webhooks and PayPal payments",
   "scripts": {
     "dev": "npm run views && tsx watch src/index.ts",
     "start": "node dist/index.js",
     "build": "npm run views && tsc -p .",
     "views": "node build-views.mjs",
     "typecheck": "tsc -p . --noEmit",
-    "test": "npm run views && node --import tsx --test test/*.test.ts",
-    "check:aws": "tsx scripts/check-aws.ts"
+    "test": "npm run views && node --import tsx --test test/*.test.ts"
   },
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
-    "@aws-sdk/client-dynamodb": "^3.1154.0",
-    "@aws-sdk/lib-dynamodb": "^3.1154.0",
     "@modelcontextprotocol/client": "2.3.1",
     "@modelcontextprotocol/ext-apps": "2.0.3",
     "@modelcontextprotocol/node": "2.1.1",

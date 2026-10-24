@@ -1,4 +1,4 @@
-// End to end: a real MCP client over Streamable HTTP against the real server, driving the replayed Ring day.
+// End to end: a real MCP client over Streamable HTTP against the real server, driving the replayed camera day.
 
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -19,7 +19,7 @@ delete process.env.ELEVENLABS_API_KEY;
 
 const { app, rt, paypal } = await import('../src/index.js');
 const { Client, StreamableHTTPClientTransport } = await import('@modelcontextprotocol/client');
-const { signRingBody } = await import('../src/ring.js');
+const { signCameraBody } = await import('../src/camera.js');
 
 let server: Server;
 let base: string;
@@ -171,16 +171,16 @@ test('grooming slots honour what the family said', async () => {
   assert.match(slots.say, /calmer/);
 });
 
-test('Ring webhooks must be signed', async () => {
-  const body = JSON.stringify({ meta: {}, data: { id: 'x', type: 'motion_detected', attributes: { source: 'replay-front-door', timestamp: Date.now() } } });
-  const res = await fetch(`${base}/ring/webhook`, { method: 'POST', body, headers: { 'content-type': 'application/json', 'x-signature': 'sha256=00' } });
+test('camera webhooks must be signed', async () => {
+  const body = JSON.stringify({ request_id: 'x', camera: 'front-door', trigger: 'motion', timestamp: Date.now(), subjects: [] });
+  const res = await fetch(`${base}/camera/webhook`, { method: 'POST', body, headers: { 'content-type': 'application/json', 'x-signature': 'sha256=00' } });
   assert.equal(res.status, 401);
-  const signed = await fetch(`${base}/ring/webhook`, {
+  const signed = await fetch(`${base}/camera/webhook`, {
     method: 'POST',
     body,
-    headers: { 'content-type': 'application/json', 'x-signature': signRingBody(Buffer.from(body), 'pawzoo-replay-signing-key') },
+    headers: { 'content-type': 'application/json', 'x-signature': signCameraBody(Buffer.from(body), 'pawzoo-replay-signing-key') },
   });
-  assert.equal(signed.status, 202, 'a verified live webhook with no Ring credentials is accepted but ignored');
+  assert.equal(signed.status, 202, 'a verified webhook with nobody on camera is accepted but ignored');
 });
 
 test('escape: an alert, a push to the TV, and resolving it', async () => {
@@ -205,7 +205,7 @@ test('voice is off without an ElevenLabs key, and says so', async () => {
   assert.equal(res.status, 503);
 });
 
-test('the simulator brain maps speech to tools without Bedrock', async () => {
+test('the simulator brain maps speech to tools without a model', async () => {
   const res = await fetch(`${base}/api/assistant`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

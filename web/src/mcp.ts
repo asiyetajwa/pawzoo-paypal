@@ -53,7 +53,7 @@ async function loggingFetch(input: RequestInfo | URL, init?: RequestInit): Promi
 }
 
 export async function connect(endpoint: URL): Promise<Client> {
-  const client = new Client({ name: 'pawzoo-alexa-plus-simulator', version: '1.0.0' }, { capabilities: {} });
+  const client = new Client({ name: 'pawzoo-simulator', version: '1.0.0' }, { capabilities: {} });
   await client.connect(new StreamableHTTPClientTransport(endpoint, { fetch: loggingFetch }));
   return client;
 }

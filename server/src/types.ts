@@ -1,4 +1,4 @@
-// Domain types shared by the agent, the Ring adapter, the MCP tools and the HTTP API.
+// Domain types shared by the agent, the camera adapter, the MCP tools and the HTTP API.
 
 export type CameraId = 'front-door' | 'living-room' | 'kitchen' | 'backyard';
 
@@ -24,15 +24,15 @@ export type MomentTag =
   | 'escape'
   | 'moment';
 
-/** A Ring event as Pawzoo stores it: the Ring webhook fields we use plus our own tags. */
+/** A camera event as Pawzoo stores it: the webhook fields we use plus our own tags. */
 export interface PetEvent {
   id: string;
   /** ISO timestamp, UTC. */
   at: string;
   cameraId: CameraId;
-  /** Ring webhook type. */
-  ringType: 'motion_detected' | 'button_press';
-  /** Ring motion classification: who or what moved. */
+  /** Motion, or a press of the doorbell. */
+  trigger: 'motion' | 'doorbell';
+  /** Motion classification: who or what moved. */
   subjects: Array<'human' | 'animal' | 'vehicle'>;
   tag: MomentTag;
   /** One line a person would say about the clip. */
@@ -42,7 +42,7 @@ export interface PetEvent {
   snapshot: string;
   /** Seconds of the clip worth showing in the day reel. */
   highlightSeconds: number;
-  source: 'ring-live' | 'replay';
+  source: 'camera-live' | 'replay';
 }
 
 export interface Pet {

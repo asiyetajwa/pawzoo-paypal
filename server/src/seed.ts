@@ -27,7 +27,7 @@ export const PRODUCTS: Product[] = [
 export interface ScenarioEvent {
   time: string; // HH:MM local
   cameraId: CameraId;
-  ringType: PetEvent['ringType'];
+  trigger: PetEvent['trigger'];
   subjects: PetEvent['subjects'];
   tag: MomentTag;
   caption: string;
@@ -37,23 +37,23 @@ export interface ScenarioEvent {
 
 /** Biscuit's Thursday, as the cameras see it. The escape is a separate script the presenter triggers. */
 export const DAY_SCRIPT: ScenarioEvent[] = [
-  { time: '07:12', cameraId: 'living-room', ringType: 'motion_detected', subjects: ['animal'], tag: 'wake', caption: 'Biscuit wakes up and stretches', clip: 'wake', highlightSeconds: 4 },
-  { time: '07:31', cameraId: 'kitchen', ringType: 'motion_detected', subjects: ['animal', 'human'], tag: 'meal', caption: 'Breakfast, gone in a minute', clip: 'meal', highlightSeconds: 4 },
-  { time: '08:04', cameraId: 'front-door', ringType: 'button_press', subjects: ['human'], tag: 'walker_arrive', caption: 'Dana from Leash & Lead rings the bell', clip: 'walker-arrive', highlightSeconds: 3 },
-  { time: '08:06', cameraId: 'front-door', ringType: 'motion_detected', subjects: ['human', 'animal'], tag: 'walk_start', caption: 'Off on the morning walk', clip: 'walk-start', highlightSeconds: 5 },
-  { time: '08:41', cameraId: 'front-door', ringType: 'motion_detected', subjects: ['human', 'animal'], tag: 'walk_end', caption: 'Back from the walk, tail going', clip: 'walk-end', highlightSeconds: 5 },
-  { time: '08:43', cameraId: 'front-door', ringType: 'motion_detected', subjects: ['human'], tag: 'walker_leave', caption: 'Dana heads out', clip: 'walker-leave', highlightSeconds: 2 },
-  { time: '11:20', cameraId: 'living-room', ringType: 'motion_detected', subjects: ['animal'], tag: 'couch', caption: 'Claims the couch. Again.', clip: 'couch', highlightSeconds: 4 },
-  { time: '13:05', cameraId: 'living-room', ringType: 'motion_detected', subjects: ['animal'], tag: 'nap', caption: 'A long afternoon nap in the sun', clip: 'nap', highlightSeconds: 4 },
-  { time: '15:32', cameraId: 'living-room', ringType: 'motion_detected', subjects: ['animal'], tag: 'window_watch', caption: 'On patrol: the delivery truck is here', clip: 'window-watch', highlightSeconds: 4 },
-  { time: '16:10', cameraId: 'backyard', ringType: 'motion_detected', subjects: ['animal'], tag: 'zoomies', caption: 'Backyard zoomies', clip: 'zoomies', highlightSeconds: 6 },
-  { time: '18:24', cameraId: 'front-door', ringType: 'motion_detected', subjects: ['human', 'animal'], tag: 'family_home', caption: 'Maya is home. Best moment of the day.', clip: 'family-home', highlightSeconds: 6 },
+  { time: '07:12', cameraId: 'living-room', trigger: 'motion', subjects: ['animal'], tag: 'wake', caption: 'Biscuit wakes up and stretches', clip: 'wake', highlightSeconds: 4 },
+  { time: '07:31', cameraId: 'kitchen', trigger: 'motion', subjects: ['animal', 'human'], tag: 'meal', caption: 'Breakfast, gone in a minute', clip: 'meal', highlightSeconds: 4 },
+  { time: '08:04', cameraId: 'front-door', trigger: 'doorbell', subjects: ['human'], tag: 'walker_arrive', caption: 'Dana from Leash & Lead rings the bell', clip: 'walker-arrive', highlightSeconds: 3 },
+  { time: '08:06', cameraId: 'front-door', trigger: 'motion', subjects: ['human', 'animal'], tag: 'walk_start', caption: 'Off on the morning walk', clip: 'walk-start', highlightSeconds: 5 },
+  { time: '08:41', cameraId: 'front-door', trigger: 'motion', subjects: ['human', 'animal'], tag: 'walk_end', caption: 'Back from the walk, tail going', clip: 'walk-end', highlightSeconds: 5 },
+  { time: '08:43', cameraId: 'front-door', trigger: 'motion', subjects: ['human'], tag: 'walker_leave', caption: 'Dana heads out', clip: 'walker-leave', highlightSeconds: 2 },
+  { time: '11:20', cameraId: 'living-room', trigger: 'motion', subjects: ['animal'], tag: 'couch', caption: 'Claims the couch. Again.', clip: 'couch', highlightSeconds: 4 },
+  { time: '13:05', cameraId: 'living-room', trigger: 'motion', subjects: ['animal'], tag: 'nap', caption: 'A long afternoon nap in the sun', clip: 'nap', highlightSeconds: 4 },
+  { time: '15:32', cameraId: 'living-room', trigger: 'motion', subjects: ['animal'], tag: 'window_watch', caption: 'On patrol: the delivery truck is here', clip: 'window-watch', highlightSeconds: 4 },
+  { time: '16:10', cameraId: 'backyard', trigger: 'motion', subjects: ['animal'], tag: 'zoomies', caption: 'Backyard zoomies', clip: 'zoomies', highlightSeconds: 6 },
+  { time: '18:24', cameraId: 'front-door', trigger: 'motion', subjects: ['human', 'animal'], tag: 'family_home', caption: 'Maya is home. Best moment of the day.', clip: 'family-home', highlightSeconds: 6 },
 ];
 
 export const ESCAPE_SCRIPT: ScenarioEvent = {
   time: '14:20',
   cameraId: 'front-door',
-  ringType: 'motion_detected',
+  trigger: 'motion',
   subjects: ['animal'],
   tag: 'escape',
   caption: 'Biscuit is outside the front door on her own',
@@ -76,7 +76,7 @@ export function eventFromScript(s: ScenarioEvent, date: string, timeZone: string
     id: `evt-${date}-${s.time.replace(':', '')}-${s.cameraId}`,
     at,
     cameraId: s.cameraId,
-    ringType: s.ringType,
+    trigger: s.trigger,
     subjects: s.subjects,
     tag: s.tag,
     caption: s.caption,
