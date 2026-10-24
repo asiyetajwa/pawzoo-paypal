@@ -7,7 +7,7 @@ Copy each section into the Devpost form.
 
 ## Links
 
-- **Demo video (YouTube, about 1:22):** to add once uploaded (file: `film/out/PawzooLandscape.mp4`, rendered from the repo).
+- **Demo video (YouTube, 1:22):** https://youtu.be/rDtK80juuAk (must be set to Public before submitting: the rules ask for a publicly visible video)
 - **Repository (public, MIT license):** https://github.com/asiyetajwa/pawzoo-paypal
 - **Thumbnail:** `docs/thumbnail.jpg` (3:2) and `docs/thumbnail-youtube.jpg` (16:9).
 
