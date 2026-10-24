@@ -459,7 +459,8 @@ export function completePayment(state: State, orderId: string, capture: { captur
     totalUsd: payment.totalUsd,
     paypalOrderId: orderId,
     transactionId: capture.captureId,
-    payer: capture.payerEmail,
+    // The PayPal account, masked: enough to recognise it, not enough to copy it.
+    payer: capture.payerEmail ? capture.payerEmail.replace(/^([^@])[^@]*(@.*)$/, '$1•••$2') : null,
     capturedAt: capture.capturedAt,
     gateway: payment.gateway,
   };

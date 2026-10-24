@@ -117,6 +117,9 @@ function paypalCard(d: Any): string {
     ${button('I Approved It', 'capture_paypal_order', { order_id: p.orderId }, 'quiet')}</div>`;
 }
 
+/** Receipts show the payer's PayPal account without spelling out the address: s•••@example.com. */
+const maskEmail = (e: string) => e.replace(/^([^@])[^@]*(@.*)$/, '$1•••$2');
+
 const day = (iso: string) => when(`${iso}T17:00:00Z`, { weekday: 'long', month: 'short', day: 'numeric' });
 
 function receiptCard(d: Any): string {
@@ -127,7 +130,7 @@ function receiptCard(d: Any): string {
   const walk = r.walk ? `<ul class="facts"><li><b>Walk</b> ${esc(r.walk.walker)}, ${String(r.walk.minutes)} minutes, ${esc(day(r.walk.date))}</li></ul>` : '';
   return `<header><p class="eyebrow">Receipt${r.gateway === 'stand-in' ? ', offline stand-in' : ', PayPal sandbox'}</p><h1>${esc(r.title)}</h1></header>
     ${lineRows(r.lines, r.totalUsd)}${food}${walk}
-    <ul class="facts small"><li><b>PayPal transaction</b> <code>${esc(r.transactionId)}</code></li><li><b>Paid</b> ${esc(when(r.capturedAt, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }))}${r.payer ? ` by ${esc(r.payer)}` : ''}</li></ul>
+    <ul class="facts small"><li><b>PayPal transaction</b> <code>${esc(r.transactionId)}</code></li><li><b>Paid</b> ${esc(when(r.capturedAt, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }))}${r.payer ? ` by ${esc(maskEmail(r.payer))}` : ''}</li></ul>
     <div class="actions">${button('All Receipts', 'order_receipt', { limit: 5 }, 'quiet')}</div>`;
 }
 

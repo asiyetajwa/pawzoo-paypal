@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pawzoo Thumbnail</title>
+<style>
+@font-face { font-family: 'Outfit'; src: url('../public/fonts/outfit-variable.woff2') format('woff2'); font-weight: 300 800; }
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { width: var(--w); height: var(--h); overflow: hidden; font-family: 'Outfit', sans-serif; background: radial-gradient(80% 90% at 30% 30%, #f6f6f9, #e7e7ec 70%); position: relative; color: #1f1b2e; }
+.copy { position: absolute; left: 6%; top: 50%; transform: translateY(-50%); width: 44%; }
+.brand { display: flex; align-items: center; gap: 16px; font-weight: 800; font-size: calc(var(--h) * 0.07); letter-spacing: -0.03em; }
+.brand img { width: calc(var(--h) * 0.085); height: calc(var(--h) * 0.085); }
+h1 { margin: calc(var(--h) * 0.04) 0 0; font-size: calc(var(--h) * 0.1); line-height: 1.02; font-weight: 700; letter-spacing: -0.03em; }
+h1 span { color: #8b5cf6; }
+p { margin: calc(var(--h) * 0.03) 0 0; font-size: calc(var(--h) * 0.04); color: #6b6880; font-weight: 500; line-height: 1.3; }
+.shot { position: absolute; right: 5%; top: 50%; width: 42%; transform: translateY(-50%) perspective(1600px) rotateY(-8deg); background: #fff; padding: 2.2% 2.6%; border-radius: 18px; overflow: hidden; box-shadow: 0 50px 100px rgba(31,27,46,0.28); }
+.shot img { display: block; width: 100%; }
+</style>
+</head>
+<body>
+<div class="copy">
+  <div class="brand"><img src="../public/logo.svg" alt="">Pawzoo</div>
+  <h1>It proposes. You approve. <span>PayPal pays.</span></h1>
+  <p>A pet-care agent with a receipt for every refill and every tip.</p>
+</div>
+<div class="shot"><img src="clip.png" alt=""></div>
+</body>
+</html>
