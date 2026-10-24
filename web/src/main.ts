@@ -1,7 +1,7 @@
 // Pawzoo, simulated as an Alexa+ add-on on a screen device.
 // The page is a real MCP client: it connects to the Pawzoo server, lists its tools, calls them,
 // and renders the MCP Apps card the server returns. An assistant endpoint chooses the tools
-// (Amazon Bedrock when configured, rules otherwise), standing in for Alexa+ itself.
+// (Claude when configured, rules otherwise).
 
 import type { Client } from '@modelcontextprotocol/client';
 import { AppBridge, PostMessageTransport } from '@modelcontextprotocol/ext-apps/app-bridge';
@@ -275,7 +275,7 @@ async function turn(utterance: string): Promise<void> {
       }),
     })
   ).json()) as { calls: Array<{ name: string; arguments: Any }>; say?: string; source: string; modelId?: string };
-  $('#brain').textContent = plan.source === 'bedrock' ? `Amazon Bedrock (${plan.modelId ?? 'model'})` : 'rules (offline)';
+  $('#brain').textContent = plan.source === 'claude' ? `Claude (${plan.modelId ?? 'model'})` : 'rules (offline)';
 
   if (!plan.calls.length) {
     // "No", or anything else that isn't a tool call, moves on: nothing is left waiting for a yes.
@@ -311,7 +311,7 @@ async function turn(utterance: string): Promise<void> {
     remember(call.name, result);
     if (call.name === 'get_pet_day') {
       const sc = result.structuredContent ?? {};
-      $('#digest').textContent = sc.digestSource === 'bedrock' ? `Amazon Bedrock (${sc.digestModel})` : 'template (Bedrock off or failed)';
+      $('#digest').textContent = sc.digestSource === 'claude' ? `Claude (${sc.digestModel})` : 'template (Claude off or failed)';
     }
     const scene = sceneFor(call.name, result);
     if (scene) setScene(scene);
@@ -487,7 +487,7 @@ async function boot(): Promise<void> {
     const status = (await statusRes.json()) as Any;
     const state = status.store === 'dynamodb' ? 'Amazon DynamoDB' : status.storeError ? `local file (DynamoDB failed: ${esc(status.storeError)})` : 'local file';
     session.insertAdjacentHTML('beforeend', `<dt>State</dt><dd${status.storeError ? ' class="warn"' : ''}>${state}</dd><dt>Ring</dt><dd>${status.ring === 'live' ? 'live account' : 'replay'}</dd>`);
-    if (!status.bedrockModel) $('#brain').textContent = 'rules (Bedrock off: no BEDROCK_MODEL_ID)';
+    if (!status.model) $('#brain').textContent = 'rules (Claude off: no ANTHROPIC_API_KEY)';
     voiceOn = Boolean(status.voice);
     session.insertAdjacentHTML('beforeend', `<dt>Voice</dt><dd>${status.voice ? 'ElevenLabs' : 'off (set ELEVENLABS_API_KEY)'}</dd>`);
   }

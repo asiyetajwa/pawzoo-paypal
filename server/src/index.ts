@@ -14,7 +14,7 @@ import { Runtime, type Push } from './runtime.js';
 import { storeFromEnv } from './store.js';
 import { dayReel, daySummary, foodProjection } from './agent.js';
 import { assistantTurn } from './assistant.js';
-import { bedrockModel } from './bedrock.js';
+import { claudeModel, spentUsd } from './claude.js';
 import { speak, voiceConfig } from './voice.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -91,8 +91,8 @@ app.get('/api/status', (_req, res) => {
   res.json({
     store: rt.store.kind,
     storeError: rt.storeError,
-    bedrockModel: bedrockModel(),
-    region: process.env.AWS_REGION ?? null,
+    model: claudeModel(),
+    spentUsd: spentUsd(),
     ring: rt.ring ? 'live' : 'replay',
     voice: voice.enabled ? { provider: 'elevenlabs', voiceId: voice.voiceId, modelId: voice.modelId } : null,
   });
@@ -199,7 +199,7 @@ if (process.env.PAWZOO_NO_LISTEN !== '1') {
       console.error('[startup] Could not replay the demo day:', (err as Error).message);
     }
     console.log(`Pawzoo on http://${host}:${port}  (MCP: /mcp, store: ${rt.store.kind}, demo date ${rt.demoDate})`);
-    console.log(`Bedrock: ${bedrockModel() ?? 'off (template answers)'}${bedrockModel() ? ` in ${process.env.AWS_REGION ?? 'the default region'}` : ''}`);
+    console.log(`Claude: ${claudeModel() ?? 'off (rules and template answers; set ANTHROPIC_API_KEY and PAWZOO_BUDGET_USD in .env)'}`);
     console.log(`Voice: ${voiceConfig().enabled ? `ElevenLabs (voice ${voiceConfig().voiceId})` : 'off (set ELEVENLABS_API_KEY in .env)'}`);
     if (host === '0.0.0.0') {
       const addresses = lanAddresses();

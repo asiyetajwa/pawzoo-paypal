@@ -1,10 +1,10 @@
-// Stand-in for the Alexa+ brain in the simulator: decides which Pawzoo tools an utterance needs.
-// The browser then makes those calls itself over MCP, exactly as Alexa+ would.
-// With Bedrock configured, a model picks the tools from the live tools/list. Without it, a small
+// The assistant's brain in the simulator: decides which Pawzoo tools an utterance needs.
+// The browser then makes those calls itself over MCP, as any MCP host would.
+// With Claude configured, the model picks the tools from the live tools/list. Without it, a small
 // rule set does, so the simulator always works offline.
 
-import type { Tool } from '@aws-sdk/client-bedrock-runtime';
-import { bedrockModel, converse } from './bedrock.js';
+import type Anthropic from '@anthropic-ai/sdk';
+import { ask, claudeModel, LOW_EFFORT } from './claude.js';
 
 export interface PlannedCall {
   name: string;
@@ -14,7 +14,7 @@ export interface PlannedCall {
 export interface AssistantPlan {
   calls: PlannedCall[];
   say?: string;
-  source: 'bedrock' | 'rules';
+  source: 'claude' | 'rules';
   modelId?: string;
 }
 
@@ -73,56 +73,51 @@ interface McpToolSummary {
   inputSchema?: Record<string, unknown>;
 }
 
-const SYSTEM = `You are Alexa+, a home assistant, using the Pawzoo add-on for the family's dog, Biscuit.
+const SYSTEM = `You are the family's home assistant, using Pawzoo for their dog, Biscuit.
 Choose the Pawzoo tools that answer the person. Call tools; do not answer from your own knowledge.
 Money or bookings: first call the quote_ tool; call confirm_action only when the person says yes, with confirmation_id "$last_confirmation".
 To act on earlier results use these placeholders exactly: "$first_moment" (an event_id), "$recommended_slot" (a slot_id), "$open_alert" (an alert_id), "$last_walk" (a walk_id).
 Use at most two tools. Never give medical or veterinary advice.`;
 
-/** MCP tool schemas carry a "$schema" keyword some Bedrock models reject; the rest passes through. */
+/** MCP tool schemas carry a "$schema" keyword the Messages API does not need; the rest passes through. */
 export function toolSchema(schema: Record<string, unknown> | undefined): Record<string, unknown> {
   const { $schema: _dialect, ...rest } = schema ?? { type: 'object', properties: {} };
   return rest;
 }
 
-export async function planWithBedrock(utterance: string, tools: McpToolSummary[], history: unknown): Promise<AssistantPlan | null> {
-  if (!bedrockModel() || !tools.length) return null;
+export async function planWithClaude(utterance: string, tools: McpToolSummary[], history: unknown): Promise<AssistantPlan | null> {
+  if (!claudeModel() || !tools.length) return null;
   try {
-    const toolConfig = {
-      tools: tools.map(
-        (t): Tool => ({
-          toolSpec: {
-            name: t.name,
-            description: (t.description ?? t.name).slice(0, 600),
-            inputSchema: { json: toolSchema(t.inputSchema) as never },
-          },
-        }),
-      ),
-    };
     const recent = Array.isArray(history) ? (history as Array<{ role: string; text: string }>).slice(-6) : [];
     const context = recent.map((h) => `${h.role}: ${h.text}`).join('\n');
-    const out = await converse(
+    const out = await ask(
       {
-        system: [{ text: SYSTEM }],
-        messages: [{ role: 'user', content: [{ text: `${context ? `Conversation so far:\n${context}\n\n` : ''}Person: ${utterance}` }] }],
-        toolConfig,
+        max_tokens: 1500,
+        ...LOW_EFFORT,
+        system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
+        tools: tools.map(
+          (t): Anthropic.Tool => ({
+            name: t.name,
+            description: (t.description ?? t.name).slice(0, 600),
+            input_schema: toolSchema(t.inputSchema) as Anthropic.Tool.InputSchema,
+          }),
+        ),
+        messages: [{ role: 'user', content: `${context ? `Conversation so far:\n${context}\n\n` : ''}Person: ${utterance}` }],
       },
-      { maxTokens: 1500, temperature: 0 },
+      'assistant',
     );
-    const content = out.output?.message?.content ?? [];
-    const calls = content
-      .filter((c) => c.toolUse)
-      .map((c) => ({ name: c.toolUse!.name!, arguments: (c.toolUse!.input ?? {}) as Record<string, unknown> }))
+    const calls = out.content
+      .flatMap((c) => (c.type === 'tool_use' ? [{ name: c.name, arguments: c.input as Record<string, unknown> }] : []))
       .slice(0, 2);
-    const say = content.map((c) => c.text ?? '').join('').trim() || undefined;
-    return { calls, say: calls.length ? undefined : say, source: 'bedrock', modelId: bedrockModel() ?? undefined };
+    const say = out.content.map((c) => (c.type === 'text' ? c.text : '')).join('').trim() || undefined;
+    return { calls, say: calls.length ? undefined : say, source: 'claude', modelId: claudeModel() ?? undefined };
   } catch (err) {
-    console.warn('[assistant] Bedrock unavailable, using rules:', (err as Error).message);
+    console.warn('[assistant] Claude unavailable, using rules:', (err as Error).message);
     return null;
   }
 }
 
 export async function assistantTurn(utterance: string, tools: unknown, history: unknown): Promise<AssistantPlan> {
   const list = Array.isArray(tools) ? (tools as McpToolSummary[]) : [];
-  return (await planWithBedrock(utterance, list, history)) ?? planWithRules(utterance);
+  return (await planWithClaude(utterance, list, history)) ?? planWithRules(utterance);
 }
