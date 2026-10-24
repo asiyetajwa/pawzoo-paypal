@@ -11,11 +11,13 @@ import type { Server } from 'node:http';
 process.env.PAWZOO_NO_LISTEN = '1';
 process.env.PAWZOO_DEMO_DATE = '2026-10-22';
 process.env.PAWZOO_STATE_FILE = join(mkdtempSync(join(tmpdir(), 'pawzoo-')), 'state.json');
-process.env.PAWZOO_BEDROCK = 'off';
+process.env.PAWZOO_CLAUDE = 'off';
+delete process.env.PAYPAL_CLIENT_ID;
+delete process.env.PAYPAL_CLIENT_SECRET;
 process.env.PAWZOO_ENV_FILE = join(tmpdir(), 'pawzoo-no-env');
 delete process.env.ELEVENLABS_API_KEY;
 
-const { app, rt } = await import('../src/index.js');
+const { app, rt, paypal } = await import('../src/index.js');
 const { Client, StreamableHTTPClientTransport } = await import('@modelcontextprotocol/client');
 const { signRingBody } = await import('../src/ring.js');
 
@@ -52,7 +54,7 @@ test('negotiates MCP 2025-11-25 over Streamable HTTP', () => {
 test('lists the tools and the MCP Apps card', async () => {
   const { tools } = await client.listTools();
   const names = tools.map((t) => t.name);
-  for (const n of ['get_pet_day', 'find_moment', 'play_on_tv', 'check_food', 'quote_food_order', 'get_walk_report', 'confirm_action', 'remember']) {
+  for (const n of ['get_pet_day', 'find_moment', 'play_on_tv', 'check_food', 'propose_reorder', 'get_walk_report', 'quote_walk_payment', 'create_paypal_order', 'capture_paypal_order', 'order_receipt', 'confirm_action', 'remember']) {
     assert.ok(names.includes(n), `missing ${n}`);
   }
   const day = tools.find((t) => t.name === 'get_pet_day')!;
@@ -75,15 +77,45 @@ test('morning: the walk is verified from front door events', async () => {
   assert.match(walk.say, /8:06 AM.*8:41 AM.*35 minutes of the 30 booked/);
 });
 
-test('paying the walker needs a confirmation id', async () => {
+/** The person approves on PayPal (here, the offline stand-in's approval page) and is sent back to Pawzoo. */
+async function approveOnPayPal(orderId: string): Promise<void> {
+  const res = await fetch(`${base}/paypal/stand-in/approve`, { method: 'POST', body: new URLSearchParams({ token: orderId }), redirect: 'manual' });
+  assert.equal(res.status, 302);
+  assert.equal((await fetch(new URL(res.headers.get('location')!, base))).status, 200);
+}
+
+test('paying the walker: a yes, approval on PayPal, then the capture and a receipt with the tip', async () => {
+  assert.equal(paypal.mode, 'stand-in', 'tests never reach PayPal');
   const quote = await call('quote_walk_payment', { tip_usd: 3 });
   assert.equal(quote.card, 'confirm');
-  const bogus = await client.callTool({ name: 'confirm_action', arguments: { confirmation_id: 'confirm-nope' } });
+  assert.deepEqual(quote.lines.map((l: any) => [l.name, l.unitUsd]), [["Dana's walk with Biscuit, Thursday (Leash & Lead)", 22], ['Tip for Dana', 3]]);
+  const direct = await client.callTool({ name: 'confirm_action', arguments: { confirmation_id: quote.action.id } });
+  assert.equal(direct.isError, true, 'money never moves through confirm_action');
+  const bogus = await client.callTool({ name: 'create_paypal_order', arguments: { confirmation_id: 'confirm-nope' } });
   assert.equal(bogus.isError, true);
-  const done = await call('confirm_action', { confirmation_id: quote.action.id });
-  assert.match(done.say, /Paid\. Dana gets \$25\.00/);
-  const again = await client.callTool({ name: 'confirm_action', arguments: { confirmation_id: quote.action.id } });
-  assert.equal(again.isError, true, 'a confirmation can only be used once');
+
+  const created = await call('create_paypal_order', { confirmation_id: quote.action.id });
+  assert.equal(created.card, 'paypal');
+  assert.equal(created.payment.totalUsd, 25);
+  assert.match(created.payment.approveUrl, /\/paypal\/stand-in\?token=/);
+  const early = await client.callTool({ name: 'capture_paypal_order', arguments: { order_id: created.payment.orderId } });
+  assert.equal(early.isError, true, 'nothing is captured before the person approves on PayPal');
+
+  const pushes: any[] = [];
+  const listener = (p: any) => pushes.push(p);
+  rt.bus.on('push', listener);
+  await approveOnPayPal(created.payment.orderId);
+  rt.bus.off('push', listener);
+  assert.ok(pushes.some((p) => p.type === 'paypal' && p.status === 'approved' && p.orderId === created.payment.orderId));
+
+  const paid = await call('capture_paypal_order', { order_id: created.payment.orderId });
+  assert.equal(paid.card, 'receipt');
+  assert.equal(paid.receipt.totalUsd, 25);
+  assert.equal(paid.receipt.tipUsd, 3);
+  assert.match(paid.receipt.transactionId, /^STANDIN-CAPTURE-/);
+  assert.equal(paid.receipt.walk.walker, 'Dana');
+  const again = await client.callTool({ name: 'capture_paypal_order', arguments: { order_id: created.payment.orderId } });
+  assert.equal(again.isError, true, 'an order is captured once');
 });
 
 test('evening: the day, the reel and finding a moment', async () => {
@@ -107,11 +139,30 @@ test('food: projection, memory and a confirmed order', async () => {
   const remembered = await call('remember', { fact: "She's on two and a half cups a day now" });
   assert.equal(remembered.food.dailyCups, 2.5);
   assert.equal(remembered.food.daysLeft, 6);
-  const quote = await call('quote_food_order', { quantity: 1 });
-  const done = await call('confirm_action', { confirmation_id: quote.action.id });
-  assert.equal(done.done.kind, 'order');
+  const quote = await call('propose_reorder', { quantity: 1, tip_usd: 3 });
+  assert.equal(quote.lines.length, 2, 'the bag and the tip for the driver');
+  const created = await call('create_paypal_order', { confirmation_id: quote.action.id });
+  await approveOnPayPal(created.payment.orderId);
+  const paid = await call('capture_paypal_order', { order_id: created.payment.orderId });
+  assert.equal(paid.receipt.kind, 'order');
+  assert.equal(paid.receipt.totalUsd, quote.action.totalUsd);
+  assert.equal(paid.receipt.food.dailyCups, 2.5);
+  assert.ok(paid.receipt.food.nextRunsOutOn > paid.receipt.food.runsOutBefore, 'the next run-out moves past the current one');
   const after = await call('check_food');
   assert.equal(after.food.status, 'covered');
+  const history = await call('order_receipt', { limit: 5 });
+  assert.equal(history.receipts.length, 2);
+  assert.equal(history.receipts[0].kind, 'order', 'newest first');
+  assert.match(history.say, /\$6\.00 of it tips/);
+});
+
+test('a cancelled PayPal order is never captured', async () => {
+  const quote = await call('propose_reorder', { quantity: 1 });
+  const created = await call('create_paypal_order', { confirmation_id: quote.action.id });
+  assert.equal((await fetch(`${base}/paypal/cancel?token=${created.payment.orderId}`)).status, 200);
+  const res = await client.callTool({ name: 'capture_paypal_order', arguments: { order_id: created.payment.orderId } });
+  assert.equal(res.isError, true);
+  assert.match(JSON.stringify(res.content), /cancelled/);
 });
 
 test('grooming slots honour what the family said', async () => {

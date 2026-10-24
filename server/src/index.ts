@@ -9,7 +9,9 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { localhostOriginValidation, originValidation, toNodeHandler } from '@modelcontextprotocol/node';
-import { createPawzooServer } from './mcp.js';
+import { createPawzooServer, PUBLIC_URL } from './mcp.js';
+import { gatewayFromEnv, StandInGateway } from './paypal.js';
+import { cancelPayment } from './agent.js';
 import { Runtime, type Push } from './runtime.js';
 import { storeFromEnv } from './store.js';
 import { dayReel, daySummary, foodProjection } from './agent.js';
@@ -39,13 +41,53 @@ app.post('/ring/webhook', express.raw({ type: '*/*', limit: '256kb' }), async (r
 
 app.use(express.json({ limit: '1mb' }));
 
-const mcp = toNodeHandler(createMcpHandler(() => createPawzooServer(rt, cardHtml)));
+export const paypal = gatewayFromEnv(PUBLIC_URL);
+const mcp = toNodeHandler(createMcpHandler(() => createPawzooServer(rt, cardHtml, paypal)));
 // DNS rebinding protection: browsers may only reach /mcp from allowed origins (localhost by default).
 const allowedOrigins = process.env.PAWZOO_ALLOWED_ORIGINS?.split(',').map((o) => o.trim()).filter(Boolean);
 const checkOrigin = allowedOrigins?.length ? originValidation(allowedOrigins) : localhostOriginValidation();
 app.all('/mcp', (req, res) => {
   if (!checkOrigin(req, res)) return;
   void mcp(req, res, req.body);
+});
+
+// PayPal sends the person back here after they approve (or cancel) the order on PayPal. Pawzoo only notes it:
+// the capture happens when the assistant calls capture_paypal_order, which checks the order with PayPal again.
+const closePage = (title: string, line: string) => `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;font:500 18px/1.5 system-ui,sans-serif;background:#f6f3ee;color:#2b2622;text-align:center;padding:24px}b{display:block;font-size:24px;margin-bottom:6px}</style>
+<div><b>${title}</b>${line}</div><script>setTimeout(() => window.close(), 1200)</script>`;
+
+app.get('/paypal/return', (req, res) => {
+  const orderId = String(req.query.token ?? '');
+  if (orderId) rt.push({ type: 'paypal', status: 'approved', orderId });
+  res.setHeader('cache-control', 'no-store');
+  res.send(closePage('Approved on PayPal', 'Pawzoo will finish the payment now. You can close this window.'));
+});
+
+app.get('/paypal/cancel', async (req, res) => {
+  const orderId = String(req.query.token ?? '');
+  if (orderId) {
+    await rt.withState((s) => cancelPayment(s, orderId)).catch(() => undefined);
+    rt.push({ type: 'paypal', status: 'cancelled', orderId });
+  }
+  res.setHeader('cache-control', 'no-store');
+  res.send(closePage('Cancelled', 'Nothing was charged.'));
+});
+
+// Without PayPal credentials, an offline stand-in plays PayPal's approval page. It says so, and moves no money.
+app.get('/paypal/stand-in', (req, res) => {
+  const orderId = String(req.query.token ?? '');
+  res.setHeader('cache-control', 'no-store');
+  res.send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>PayPal Stand-In</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;font:500 17px/1.5 system-ui,sans-serif;background:#eef1f6;color:#1c2333;padding:24px}form{background:#fff;border-radius:18px;padding:28px;max-width:360px;box-shadow:0 10px 30px rgba(0,0,0,.08)}button{font:inherit;font-weight:700;border:0;border-radius:999px;padding:12px 22px;margin:14px 8px 0 0;cursor:pointer}.ok{background:#1c2333;color:#fff}</style>
+<form method="post" action="/paypal/stand-in/approve"><b>Offline stand-in for PayPal</b><p>No PayPal credentials are set, so this page plays PayPal's approval step. No money moves.</p>
+<input type="hidden" name="token" value="${orderId.replace(/[^A-Z0-9-]/gi, '')}"><button class="ok">Approve</button><a href="/paypal/cancel?token=${encodeURIComponent(orderId)}">Cancel</a></form>`);
+});
+
+app.post('/paypal/stand-in/approve', express.urlencoded({ extended: false }), (req, res) => {
+  const orderId = String((req.body as { token?: string }).token ?? '');
+  if (paypal instanceof StandInGateway) paypal.approve(orderId);
+  res.redirect(`/paypal/return?token=${encodeURIComponent(orderId)}`);
 });
 
 // Live pushes (server-sent events) for the Fire TV app and the Alexa+ simulator.
@@ -93,6 +135,7 @@ app.get('/api/status', (_req, res) => {
     storeError: rt.storeError,
     model: claudeModel(),
     spentUsd: spentUsd(),
+    paypal: paypal.mode,
     ring: rt.ring ? 'live' : 'replay',
     voice: voice.enabled ? { provider: 'elevenlabs', voiceId: voice.voiceId, modelId: voice.modelId } : null,
   });
@@ -199,6 +242,7 @@ if (process.env.PAWZOO_NO_LISTEN !== '1') {
       console.error('[startup] Could not replay the demo day:', (err as Error).message);
     }
     console.log(`Pawzoo on http://${host}:${port}  (MCP: /mcp, store: ${rt.store.kind}, demo date ${rt.demoDate})`);
+    console.log(`PayPal: ${paypal.mode === 'sandbox' ? 'sandbox, through the PayPal Agent Toolkit' : 'offline stand-in (set PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET in .env)'}`);
     console.log(`Claude: ${claudeModel() ?? 'off (rules and template answers; set ANTHROPIC_API_KEY and PAWZOO_BUDGET_USD in .env)'}`);
     console.log(`Voice: ${voiceConfig().enabled ? `ElevenLabs (voice ${voiceConfig().voiceId})` : 'off (set ELEVENLABS_API_KEY in .env)'}`);
     if (host === '0.0.0.0') {

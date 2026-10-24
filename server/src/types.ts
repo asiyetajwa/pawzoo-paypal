@@ -169,9 +169,50 @@ export interface State {
   facts: Fact[];
   /** Quotes awaiting the person's confirmation. Nothing is bought or paid without one. */
   pending: PendingAction[];
+  /** PayPal orders created after a yes, waiting for the person's approval on PayPal or already captured. */
+  payments: Payment[];
+  /** Receipts for every captured payment. Kept across demo days: the loop's history. */
+  receipts: Receipt[];
+}
+
+export interface PayLineItem {
+  name: string;
+  unitUsd: number;
+  quantity: number;
+}
+
+export interface Payment {
+  /** PayPal's order id. */
+  orderId: string;
+  action: PendingAction & { kind: 'order' | 'walk_payment' };
+  lines: PayLineItem[];
+  totalUsd: number;
+  approveUrl: string | null;
+  status: 'awaiting_approval' | 'captured' | 'cancelled';
+  gateway: 'sandbox' | 'stand-in';
+  createdAt: string;
+}
+
+export interface Receipt {
+  id: string;
+  pet: string;
+  kind: 'order' | 'walk_payment';
+  title: string;
+  lines: PayLineItem[];
+  tipUsd: number;
+  totalUsd: number;
+  paypalOrderId: string;
+  /** PayPal's capture id: the transaction id on the payer's PayPal activity. */
+  transactionId: string;
+  payer: string | null;
+  capturedAt: string;
+  gateway: 'sandbox' | 'stand-in';
+  /** For food: when it arrives, how long a bag lasts at the current rate, and the next predicted run-out. */
+  food?: { product: string; quantity: number; arrivesOn: string; dailyCups: number; bagLastsDays: number; runsOutBefore: string; nextRunsOutOn: string };
+  walk?: { walker: string; date: string; minutes: number };
 }
 
 export type PendingAction =
-  | { id: string; kind: 'order'; productId: string; quantity: number; totalUsd: number; createdAt: string }
+  | { id: string; kind: 'order'; productId: string; quantity: number; totalUsd: number; tipUsd: number; createdAt: string }
   | { id: string; kind: 'walk_payment'; walkId: string; amountUsd: number; tipUsd: number; createdAt: string }
   | { id: string; kind: 'booking'; slotId: string; createdAt: string };

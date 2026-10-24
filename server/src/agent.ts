@@ -1,8 +1,8 @@
-// The Pawzoo agent: turns Ring events into a pet's day, and turns the day into things worth doing.
+// The Pawzoo agent: turns camera events into a pet's day, and turns the day into things worth doing.
 // Every function here is deterministic. Language models only phrase the results (see digest.ts).
 
 import { randomUUID } from 'node:crypto';
-import type { Alert, Booking, CareSlot, MomentTag, Order, PendingAction, PetEvent, Product, State, Walk } from './types.js';
+import type { Alert, Booking, CareSlot, MomentTag, Order, PayLineItem, Payment, PendingAction, PetEvent, Product, Receipt, State, Walk } from './types.js';
 import { PRODUCTS, careSlots } from './seed.js';
 import { addDays, clockLabel, daysBetween, localParts, weekdayName } from './time.js';
 
@@ -298,9 +298,9 @@ function pendingId(): string {
   return `confirm-${randomUUID().slice(0, 8)}`;
 }
 
-export function quoteOrder(state: State, productId: string, quantity: number, now: Date): PendingAction & { kind: 'order' } {
+export function quoteOrder(state: State, productId: string, quantity: number, now: Date, tipUsd = 0): PendingAction & { kind: 'order' } {
   const p = product(productId);
-  const action = { id: pendingId(), kind: 'order' as const, productId, quantity, totalUsd: round2(p.priceUsd * quantity), createdAt: now.toISOString() };
+  const action = { id: pendingId(), kind: 'order' as const, productId, quantity, totalUsd: round2(p.priceUsd * quantity + tipUsd), tipUsd: round2(tipUsd), createdAt: now.toISOString() };
   state.pending.push(action);
   return action;
 }
@@ -331,7 +331,13 @@ export type Confirmed =
 export function confirm(state: State, confirmationId: string, now: Date): Confirmed {
   const action = state.pending.find((p) => p.id === confirmationId);
   if (!action) throw new Error('That confirmation has expired or was already used. Ask again for a fresh quote.');
+  if (action.kind !== 'booking') throw new Error('Payments go through PayPal: call create_paypal_order with this confirmation_id.');
   state.pending = state.pending.filter((p) => p.id !== confirmationId);
+  return fulfil(state, action, now);
+}
+
+/** Carries out a confirmed action. Orders and walk payments reach here only after PayPal captured the money. */
+function fulfil(state: State, action: PendingAction, now: Date): Confirmed {
   const tz = state.household.timeZone;
   const today = localParts(now, tz).date;
   switch (action.kind) {
@@ -383,4 +389,95 @@ export function resolveAlert(state: State, alertId: string, now: Date): Alert {
 
 export function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+// ---------- PayPal: lines, payments and receipts ----------
+
+/** The exact lines the person said yes to, as they will appear on PayPal and on the receipt. */
+export function payLines(state: State, action: PendingAction & { kind: 'order' | 'walk_payment' }): PayLineItem[] {
+  if (action.kind === 'order') {
+    const p = product(action.productId);
+    const lines: PayLineItem[] = [{ name: `${p.name}, ${p.sizeLabel}`, unitUsd: p.priceUsd, quantity: action.quantity }];
+    if (action.tipUsd > 0) lines.push({ name: 'Tip for the delivery driver', unitUsd: action.tipUsd, quantity: 1 });
+    return lines;
+  }
+  const walk = state.walks.find((w) => w.id === action.walkId);
+  const who = walk?.walker ?? state.walkBooking.walker;
+  const lines: PayLineItem[] = [{ name: `${who}'s walk with ${state.pet.name}, ${walk ? weekdayName(walk.date) : 'today'} (${state.walkBooking.company})`, unitUsd: action.amountUsd, quantity: 1 }];
+  if (action.tipUsd > 0) lines.push({ name: `Tip for ${who}`, unitUsd: action.tipUsd, quantity: 1 });
+  return lines;
+}
+
+export const linesTotalUsd = (lines: PayLineItem[]) => round2(lines.reduce((s, l) => s + l.unitUsd * l.quantity, 0));
+
+/** The person said yes: take the quote out of pending and hold it against a PayPal order awaiting their approval. */
+export function moneyAction(state: State, confirmationId: string): PendingAction & { kind: 'order' | 'walk_payment' } {
+  const action = state.pending.find((p) => p.id === confirmationId);
+  if (!action) throw new Error('That confirmation has expired or was already used. Ask again for a fresh quote.');
+  if (action.kind === 'booking') throw new Error('Bookings are paid at the visit: use confirm_action.');
+  return action;
+}
+
+export function startPayment(state: State, action: PendingAction & { kind: 'order' | 'walk_payment' }, order: { orderId: string; approveUrl: string | null; totalUsd: number }, gateway: Payment['gateway'], now: Date): Payment {
+  const lines = payLines(state, action);
+  const total = linesTotalUsd(lines);
+  if (Math.abs(order.totalUsd - total) > 0.001) throw new Error(`PayPal's order total $${order.totalUsd.toFixed(2)} does not match the quote $${total.toFixed(2)}. Nothing was charged.`);
+  state.pending = state.pending.filter((p) => p.id !== action.id);
+  const payment: Payment = { orderId: order.orderId, action, lines, totalUsd: total, approveUrl: order.approveUrl, status: 'awaiting_approval', gateway, createdAt: now.toISOString() };
+  state.payments.push(payment);
+  return payment;
+}
+
+export function paymentFor(state: State, orderId: string): Payment {
+  const payment = state.payments.find((p) => p.orderId === orderId);
+  if (!payment) throw new Error("I don't have a PayPal order with that id.");
+  return payment;
+}
+
+export function cancelPayment(state: State, orderId: string): Payment {
+  const payment = paymentFor(state, orderId);
+  if (payment.status === 'awaiting_approval') payment.status = 'cancelled';
+  return payment;
+}
+
+/** PayPal captured exactly the approved total: carry out the action and write the receipt. */
+export function completePayment(state: State, orderId: string, capture: { captureId: string; totalUsd: number; payerEmail: string | null; capturedAt: string }, now: Date): { receipt: Receipt; done: Confirmed } {
+  const payment = paymentFor(state, orderId);
+  if (payment.status !== 'awaiting_approval') throw new Error(`That PayPal order is already ${payment.status}.`);
+  if (Math.abs(capture.totalUsd - payment.totalUsd) > 0.001) throw new Error(`PayPal captured $${capture.totalUsd.toFixed(2)}, not the approved $${payment.totalUsd.toFixed(2)}.`);
+  const before = payment.action.kind === 'order' ? foodProjection(state, now) : null;
+  const done = fulfil(state, payment.action, now);
+  payment.status = 'captured';
+  const tip = payment.action.tipUsd;
+  const receipt: Receipt = {
+    id: `receipt-${randomUUID().slice(0, 8)}`,
+    pet: state.pet.name,
+    kind: payment.action.kind,
+    title: payment.action.kind === 'order' ? `Food refill for ${state.pet.name}` : `Walk for ${state.pet.name}`,
+    lines: payment.lines,
+    tipUsd: tip,
+    totalUsd: payment.totalUsd,
+    paypalOrderId: orderId,
+    transactionId: capture.captureId,
+    payer: capture.payerEmail,
+    capturedAt: capture.capturedAt,
+    gateway: payment.gateway,
+  };
+  if (done.kind === 'order' && before) {
+    // Cadence: the new food starts when the open bag runs out (or when it arrives, if later) and lasts its cups at today's rate.
+    const bagLastsDays = Math.floor(done.product.cups / state.food.dailyCups);
+    const startsOn = done.order.arrivesOn > before.runsOutOn ? done.order.arrivesOn : before.runsOutOn;
+    receipt.food = {
+      product: `${done.product.name}, ${done.product.sizeLabel}`,
+      quantity: done.order.quantity,
+      arrivesOn: done.order.arrivesOn,
+      dailyCups: state.food.dailyCups,
+      bagLastsDays,
+      runsOutBefore: before.runsOutOn,
+      nextRunsOutOn: addDays(startsOn, bagLastsDays * done.order.quantity),
+    };
+  }
+  if (done.kind === 'walk_payment') receipt.walk = { walker: done.walk.walker, date: done.walk.date, minutes: done.walk.minutes };
+  state.receipts.push(receipt);
+  return { receipt, done };
 }

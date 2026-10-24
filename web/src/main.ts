@@ -1,4 +1,4 @@
-// Pawzoo, simulated as an Alexa+ add-on on a screen device.
+// Pawzoo, simulated as a voice assistant on a screen device.
 // The page is a real MCP client: it connects to the Pawzoo server, lists its tools, calls them,
 // and renders the MCP Apps card the server returns. An assistant endpoint chooses the tools
 // (Claude when configured, rules otherwise).
@@ -42,6 +42,12 @@ const SCENES: Record<string, Scene> = {
     { src: 'cushion', x: 31, y: 46, w: 17, rot: 8 }, { src: 'ball', x: 35, y: 4, w: 9, soft: true }, { src: 'bone', x: 6, y: 66, w: 13, soft: true } ] },
   moments: { title: ['Found', 'It'], topic: 'Moments<br>on camera', props: [
     { src: 'ball', x: 31, y: 46, w: 17 }, { src: 'leash', x: 5, y: 64, w: 13, soft: true } ] },
+  paypal: { title: ['Approve', 'On PayPal'], topic: 'Your OK,<br>on PayPal', props: [
+    { src: 'cushion', x: 31, y: 46, w: 17, rot: -10 }, { src: 'bone', x: 5, y: 66, w: 14, soft: true } ] },
+  receipt: { title: ['Paid,', 'Receipt'], topic: 'Exactly what<br>you approved', props: [
+    { src: 'bowl', x: 27, y: 46, w: 22, rot: -4 }, { src: 'ball', x: 6, y: 68, w: 8, soft: true } ] },
+  receipts: { title: ["Biscuit's", 'Receipts'], topic: 'Every refill,<br>every tip', props: [
+    { src: 'bowl', x: 27, y: 46, w: 22, rot: 6 }, { src: 'bone', x: 33, y: 4, w: 12, rot: 18, soft: true } ] },
   alert: { title: ["She's", 'Out'], topic: 'Front door,<br>no person', props: [
     { src: 'house', x: 30, y: 44, w: 19, rot: -6 }, { src: 'leash', x: 6, y: 64, w: 12, soft: true } ] },
 };
@@ -100,6 +106,10 @@ function sceneFor(tool: string, result: Any): string | null {
 type Call = { name: string; arguments: Any };
 const memory: {
   lastConfirmation?: string;
+  /** Money quotes go through PayPal; bookings are confirmed directly. */
+  lastConfirmationKind?: string;
+  /** The PayPal order waiting for the person's approval on PayPal. */
+  paypalOrder?: string;
   firstMoment?: string;
   recommendedSlot?: string;
   openAlert?: string;
@@ -184,10 +194,15 @@ async function showCard(toolName: string, args: Any, result: Any): Promise<void>
   // No client passed: the host handles the card's tool calls itself, so a tap is logged, remembered and spoken.
   const bridge = new AppBridge(
     null,
-    { name: 'Pawzoo Alexa+ simulator', version: '1.0.0' },
+    { name: 'Pawzoo simulator', version: '1.0.0' },
     { serverTools: {}, logging: {} },
     { hostContext: { theme: currentTheme(), displayMode: 'inline' } },
   );
+  // "Approve on PayPal" on a card: open PayPal's own approval page for the person.
+  bridge.onopenlink = async ({ url }) => {
+    window.open(url, 'paypal', 'width=480,height=720');
+    return {};
+  };
   bridge.onsizechange = ({ height }) => {
     if (height) frame.style.height = `${Math.ceil(height)}px`;
   };
@@ -217,8 +232,13 @@ async function showCard(toolName: string, args: Any, result: Any): Promise<void>
 
 function remember(tool: string, result: Any): void {
   const s = result.structuredContent ?? {};
-  if (s.action?.id) memory.lastConfirmation = s.action.id;
-  if (tool === 'confirm_action') memory.lastConfirmation = undefined;
+  if (s.action?.id) {
+    memory.lastConfirmation = s.action.id;
+    memory.lastConfirmationKind = s.action.kind;
+  }
+  if (tool === 'confirm_action' || tool === 'create_paypal_order') memory.lastConfirmation = undefined;
+  if (s.payment?.orderId) memory.paypalOrder = s.payment.orderId;
+  if (tool === 'capture_paypal_order' && s.receipt) memory.paypalOrder = undefined;
   if (tool === 'find_moment') memory.firstMoment = s.moments?.[0]?.eventId;
   if (s.recommended) memory.recommendedSlot = s.recommended;
   if (s.report?.walk?.id) memory.lastWalk = s.report.walk.id;
@@ -229,9 +249,9 @@ function remember(tool: string, result: Any): void {
   const tip = /pay with a \$(\d+(?:\.\d+)?) tip\?$/i.exec(line);
   if (s.action?.id) memory.offer = undefined;
   else {
-    if (tool !== 'confirm_action') memory.lastConfirmation = undefined;
+    if (tool !== 'confirm_action' && tool !== 'create_paypal_order') memory.lastConfirmation = undefined;
     if (tool === 'find_care_slots' && s.recommended) memory.offer = { name: 'quote_booking', arguments: { slot_id: s.recommended } };
-    else if (/reorder\b[^?]*\?$/i.test(line)) memory.offer = { name: 'quote_food_order', arguments: { quantity: 1 } };
+    else if (/reorder\b[^?]*\?$/i.test(line)) memory.offer = { name: 'propose_reorder', arguments: { quantity: 1 } };
     else if (tip) memory.offer = { name: 'quote_walk_payment', arguments: { tip_usd: Number(tip[1]), ...(memory.lastWalk ? { walk_id: memory.lastWalk } : {}) } };
     else memory.offer = undefined;
   }
@@ -249,6 +269,7 @@ function fill(args: Any): Any {
     $recommended_slot: memory.recommendedSlot,
     $open_alert: memory.openAlert,
     $last_walk: memory.lastWalk,
+    $paypal_order: memory.paypalOrder,
   };
   const out: Any = {};
   for (const [k, v] of Object.entries(args)) {
@@ -303,10 +324,15 @@ async function turn(utterance: string): Promise<void> {
     } else if (unresolved === '$first_moment') {
       say("I couldn't find that moment on camera today.");
       return;
+    } else if (unresolved === '$paypal_order') {
+      say("There's no PayPal order waiting for approval.");
+      return;
     } else if (unresolved === '$open_alert') {
       say("There's no open alert. Biscuit is safe at home.");
       return;
     }
+    // A yes to a food order or walk payment creates the PayPal order; only bookings are confirmed directly.
+    if (call.name === 'confirm_action' && memory.lastConfirmationKind && memory.lastConfirmationKind !== 'booking') call = { name: 'create_paypal_order', arguments: call.arguments };
     const result = (await client.callTool({ name: call.name, arguments: args })) as Any;
     remember(call.name, result);
     if (call.name === 'get_pet_day') {
@@ -415,6 +441,25 @@ $('#reset').addEventListener('click', async () => {
   Object.keys(memory).forEach((k) => delete (memory as Any)[k]);
 });
 
+// ---------- PayPal ----------
+
+/** PayPal sent the person back approved: capture that order (Pawzoo checks it with PayPal again first). */
+async function finishPayPal(orderId: string): Promise<void> {
+  if (memory.paypalOrder && memory.paypalOrder !== orderId) return;
+  setLight('thinking');
+  const result = (await client.callTool({ name: 'capture_paypal_order', arguments: { order_id: orderId } })) as Any;
+  remember('capture_paypal_order', result);
+  const line = result.structuredContent?.say ?? result.content?.[0]?.text ?? '';
+  if (result.isError) {
+    say(line || 'PayPal did not confirm that payment.');
+    return;
+  }
+  transcript.innerHTML = '';
+  setScene('receipt');
+  await showCard('capture_paypal_order', { order_id: orderId }, result);
+  say(line);
+}
+
 // ---------- Live pushes ----------
 
 function listen(): void {
@@ -438,6 +483,13 @@ function listen(): void {
         'afterbegin',
         `<li><span>${new Date(e.at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Chicago' })}</span> <b>${esc(e.ringType)}</b> ${esc(e.subjects.join('+'))} &middot; ${esc(e.cameraId)} &rarr; <i>${esc(e.tag)}</i></li>`,
       );
+    }
+    if (p.type === 'paypal') {
+      if (p.status === 'approved') void finishPayPal(p.orderId as string);
+      else {
+        memory.paypalOrder = undefined;
+        say('Cancelled on PayPal. Nothing was charged.');
+      }
     }
     if (p.type === 'alert') {
       memory.openAlert = p.alert.id;

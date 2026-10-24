@@ -52,7 +52,7 @@ function dayCard(d: Any, base: string): string {
     <div class="strip">${strip || '<p class="muted">No moments yet.</p>'}</div>
     <div class="actions">
       ${button('Play on TV', 'play_on_tv', { target: 'day_reel' })}
-      ${food.status === 'order_now' || food.status === 'order_soon' ? button('Reorder Food', 'quote_food_order', { quantity: 1 }, 'quiet') : ''}
+      ${food.status === 'order_now' || food.status === 'order_soon' ? button('Reorder Food', 'propose_reorder', { quantity: 1 }, 'quiet') : ''}
     </div>`;
 }
 
@@ -82,28 +82,65 @@ function foodCard(d: Any): string {
       <li><b>Rate</b> ${f.dailyCups} cups a day, from ${esc(f.dailyCupsSource)}</li>
       ${f.incoming ? `<li><b>On the way</b> arrives ${esc(f.incoming.arrivesOn)}</li>` : ''}
     </ul>
-    ${need ? `<div class="actions">${button(`Reorder for ${money(f.product.priceUsd)}`, 'quote_food_order', { product_id: f.product.id, quantity: 1 })}</div>` : ''}`;
+    ${need ? `<div class="actions">${button(`Reorder for ${money(f.product.priceUsd)}`, 'propose_reorder', { product_id: f.product.id, quantity: 1 })}</div>` : ''}`;
+}
+
+/** The exact lines that will appear on PayPal and on the receipt. */
+function lineRows(lines: Any[], total: number): string {
+  const rows = lines.map((l) => `<li><b>${esc(l.name)}</b><span>${l.quantity > 1 ? `${String(l.quantity)} x ${money(l.unitUsd)} = ` : ''}${money(l.unitUsd * l.quantity)}</span></li>`).join('');
+  return `<ul class="lines">${rows}<li class="total"><b>Total</b><span>${money(total)}</span></li></ul>`;
 }
 
 function confirmCard(d: Any): string {
   const a = d.action;
-  let title = '';
-  let lines = '';
-  if (a.kind === 'order') {
-    title = 'Confirm order';
-    lines = `<li><b>Item</b> ${esc(d.product.name)}, ${esc(d.product.sizeLabel)}${a.quantity > 1 ? ` x${a.quantity}` : ''}</li>
-      <li><b>Delivery</b> ${d.product.deliveryDays} days</li><li><b>Total</b> ${money(a.totalUsd)}</li>`;
-  } else if (a.kind === 'walk_payment') {
-    title = 'Pay for the walk';
-    lines = `<li><b>Walk</b> ${money(a.amountUsd)}</li><li><b>Tip</b> ${money(a.tipUsd)}</li><li><b>Total</b> ${money(a.amountUsd + a.tipUsd)}</li>`;
-  } else {
-    title = 'Confirm booking';
+  if (a.kind === 'booking') {
     const s = d.slot ?? {};
-    lines = `<li><b>Where</b> ${esc(s.provider)}</li><li><b>When</b> ${esc(new Date(s.startAt).toLocaleString('en-US', { weekday: 'long', hour: 'numeric', minute: '2-digit', timeZone: 'America/Chicago' }))}</li><li><b>Price</b> ${money(s.priceUsd)}</li>`;
+    return `<header><p class="eyebrow">Needs your OK</p><h1>Confirm booking</h1></header>
+      <ul class="facts"><li><b>Where</b> ${esc(s.provider)}</li><li><b>When</b> ${esc(new Date(s.startAt).toLocaleString('en-US', { weekday: 'long', hour: 'numeric', minute: '2-digit', timeZone: 'America/Chicago' }))}</li><li><b>Price</b> ${money(s.priceUsd)}, paid at the visit</li></ul>
+      <div class="actions">${button('Confirm', 'confirm_action', { confirmation_id: a.id })}</div>`;
   }
-  return `<header><p class="eyebrow">Needs your OK</p><h1>${title}</h1></header><ul class="facts">${lines}</ul>
-    <p class="muted small">Simulated checkout. Nothing is charged in this demo.</p>
-    <div class="actions">${button('Confirm', 'confirm_action', { confirmation_id: a.id })}</div>`;
+  const total = a.kind === 'order' ? a.totalUsd : a.amountUsd + a.tipUsd;
+  const title = a.kind === 'order' ? 'Food refill' : 'Pay for the walk';
+  const extra = a.kind === 'order' ? `<p class="muted small">Arrives in ${String(d.product.deliveryDays)} days.</p>` : '';
+  return `<header><p class="eyebrow">Needs your OK</p><h1>${title}</h1></header>${lineRows(d.lines ?? [], total)}${extra}
+    <p class="muted small">Pawzoo never pays on its own. Say yes, then approve this exact total on PayPal.</p>
+    <div class="actions">${button('Yes, Pay With PayPal', 'create_paypal_order', { confirmation_id: a.id })}</div>`;
+}
+
+function paypalCard(d: Any): string {
+  const p = d.payment;
+  const standIn = d.gateway === 'stand-in';
+  return `<header><p class="eyebrow">${standIn ? 'PayPal stand-in, offline' : 'PayPal sandbox'}</p><h1>Approve ${money(p.totalUsd)}</h1></header>
+    ${lineRows(p.lines, p.totalUsd)}
+    <p class="muted small">Order ${esc(p.orderId)}. Nothing is charged until you approve on PayPal, and Pawzoo captures only this exact total.</p>
+    <div class="actions">${p.approveUrl ? `<button class="btn primary paypal" data-link="${esc(p.approveUrl)}">Approve on PayPal</button>` : ''}
+    ${button('I Approved It', 'capture_paypal_order', { order_id: p.orderId }, 'quiet')}</div>`;
+}
+
+const day = (iso: string) => when(`${iso}T17:00:00Z`, { weekday: 'long', month: 'short', day: 'numeric' });
+
+function receiptCard(d: Any): string {
+  const r = d.receipt;
+  const food = r.food
+    ? `<ul class="facts"><li><b>Arrives</b> ${esc(day(r.food.arrivesOn))}</li><li><b>Rate</b> ${r.food.dailyCups} cups a day, a bag lasts ${String(r.food.bagLastsDays)} days</li><li><b>Next run-out</b> ${esc(day(r.food.nextRunsOutOn))}</li></ul>`
+    : '';
+  const walk = r.walk ? `<ul class="facts"><li><b>Walk</b> ${esc(r.walk.walker)}, ${String(r.walk.minutes)} minutes, ${esc(day(r.walk.date))}</li></ul>` : '';
+  return `<header><p class="eyebrow">Receipt${r.gateway === 'stand-in' ? ', offline stand-in' : ', PayPal sandbox'}</p><h1>${esc(r.title)}</h1></header>
+    ${lineRows(r.lines, r.totalUsd)}${food}${walk}
+    <ul class="facts small"><li><b>PayPal transaction</b> <code>${esc(r.transactionId)}</code></li><li><b>Paid</b> ${esc(when(r.capturedAt, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }))}${r.payer ? ` by ${esc(r.payer)}` : ''}</li></ul>
+    <div class="actions">${button('All Receipts', 'order_receipt', { limit: 5 }, 'quiet')}</div>`;
+}
+
+function receiptsCard(d: Any): string {
+  const list = d.receipts as Any[];
+  const spent = list.reduce((a, r) => a + r.totalUsd, 0);
+  const tips = list.reduce((a, r) => a + r.tipUsd, 0);
+  const rows = list
+    .map((r) => `<li class="row"><div class="grow"><b>${esc(r.title)}</b><br><span class="muted small">${esc(when(r.capturedAt, { month: 'short', day: 'numeric' }))} · <code>${esc(r.transactionId)}</code>${r.food ? ` · next run-out ${esc(day(r.food.nextRunsOutOn))}` : ''}</span></div>
+      <div class="amt">${money(r.totalUsd)}${r.tipUsd ? `<br><span class="muted small">tip ${money(r.tipUsd)}</span>` : ''}</div></li>`)
+    .join('');
+  return `<header><p class="eyebrow">${esc(d.pet)}'s receipts</p><h1>${money(spent)} paid</h1><p class="muted">${money(tips)} in tips, ${String(list.length)} payment${list.length === 1 ? '' : 's'}</p></header>
+    <ul class="rows">${rows || '<li class="muted">No receipts yet.</li>'}</ul>`;
 }
 
 function walkCard(d: Any): string {
@@ -159,8 +196,7 @@ function doneCard(d: Any): string {
     title = slot.service === 'vet_checkup' ? 'Check-up booked' : slot.service === 'extra_walk' ? 'Extra walk booked' : 'Grooming booked';
     lines = `<li><b>Where</b> ${esc(slot.provider)}</li><li><b>When</b> ${esc(when(slot.startAt, { weekday: 'long', hour: 'numeric', minute: '2-digit' }))}</li><li><b>Price</b> ${money(slot.priceUsd)}</li>`;
   }
-  return `<header><p class="eyebrow">Done</p><h1>${title}</h1></header><ul class="facts">${lines}</ul>
-    <p class="muted small">Simulated. Nothing is charged in this demo.</p>`;
+  return `<header><p class="eyebrow">Done</p><h1>${title}</h1></header><ul class="facts">${lines}</ul>`;
 }
 
 function render(data: Any | undefined): void {
@@ -175,12 +211,21 @@ function render(data: Any | undefined): void {
     case 'walk': html = walkCard(data); break;
     case 'slots': html = slotsCard(data); break;
     case 'done': html = doneCard(data); break;
+    case 'paypal': html = paypalCard(data); break;
+    case 'receipt': html = receiptCard(data); break;
+    case 'receipts': html = receiptsCard(data); break;
     default: html = `<p>${esc(data.say)}</p>`;
   }
   root.innerHTML = `<article class="card">${html}<footer><span class="brand">Pawzoo</span></footer></article>`;
 }
 
 root.addEventListener('click', async (e) => {
+  const link = (e.target as HTMLElement).closest('button[data-link]') as HTMLButtonElement | null;
+  if (link) {
+    // The card runs sandboxed; the host opens PayPal's approval page for the person.
+    await app.openLink({ url: link.dataset.link! });
+    return;
+  }
   const btn = (e.target as HTMLElement).closest('button[data-tool]') as HTMLButtonElement | null;
   if (!btn) return;
   btn.disabled = true;

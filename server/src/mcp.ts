@@ -1,4 +1,4 @@
-// The Pawzoo MCP server: what Alexa+ calls. Every tool returns a line to speak plus a card to show.
+// The Pawzoo MCP server: what the assistant calls. Every tool returns a line to speak plus a card to show.
 // Cards are MCP Apps views (ui://pawzoo/card.html); buttons on a card call tools back through the host.
 
 import { readFile } from 'node:fs/promises';
@@ -7,7 +7,13 @@ import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from '@model
 import { z } from 'zod';
 import {
   availableSlots,
+  cancelPayment,
+  completePayment,
   confirm,
+  moneyAction,
+  payLines,
+  paymentFor,
+  startPayment,
   daySummary,
   dayReel,
   findMoments,
@@ -21,6 +27,7 @@ import {
   product,
 } from './agent.js';
 import { writeDigest } from './digest.js';
+import type { PayPalGateway } from './paypal.js';
 import type { Runtime } from './runtime.js';
 import { clockLabel, localParts, weekdayName } from './time.js';
 
@@ -51,13 +58,14 @@ const dateArg = z
   .optional()
   .describe('Local date YYYY-MM-DD. Defaults to today.');
 
-export function createPawzooServer(rt: Runtime, cardHtmlPath: string): McpServer {
+export function createPawzooServer(rt: Runtime, cardHtmlPath: string, paypal: PayPalGateway): McpServer {
   const server = new McpServer(
     { name: 'pawzoo', title: 'Pawzoo', version: '1.0.0' },
     {
       instructions:
-        "Pawzoo knows what the family's dog did today from their Ring cameras, and can reorder food, pay the dog walker and book care. " +
-        'Speak the `say` field. Anything that spends money or books time returns a quote first: read it out and call confirm_action only after the person clearly says yes. ' +
+        "Pawzoo knows what the family's dog did today from their home cameras, and can reorder food, pay the dog walker and book care. " +
+        'Speak the `say` field. Pawzoo never pays on its own: anything that spends money returns a quote first. Read it out; only after the person clearly says yes, call create_paypal_order. ' +
+        'The person then approves that exact total on PayPal, and only then call capture_paypal_order. Every captured payment has a receipt (order_receipt). ' +
         'Pawzoo gives no medical or veterinary advice.',
     },
   );
@@ -72,7 +80,7 @@ export function createPawzooServer(rt: Runtime, cardHtmlPath: string): McpServer
     'get_pet_day',
     {
       title: "How was the dog's day",
-      description: "Summarises the dog's day so far from the Ring cameras: walk, meals, naps, play, alerts, and food left. Use for 'How was Biscuit's day?'",
+      description: "Summarises the dog's day so far from the home cameras: walk, meals, naps, play, alerts, and food left. Use for 'How was Biscuit's day?'",
       inputSchema: z.object({ date: dateArg }),
       annotations: { readOnlyHint: true },
       _meta: CARD_META,
@@ -113,7 +121,7 @@ export function createPawzooServer(rt: Runtime, cardHtmlPath: string): McpServer
     'play_on_tv',
     {
       title: 'Show on the TV',
-      description: "Plays the dog's day reel, or one moment, on the family's Fire TV.",
+      description: "Plays the dog's day reel, or one moment, on the family's TV.",
       inputSchema: z.object({
         target: z.enum(['day_reel', 'moment']),
         event_id: z.string().optional().describe('Moment to play when target is moment (from find_moment).'),
@@ -151,25 +159,29 @@ export function createPawzooServer(rt: Runtime, cardHtmlPath: string): McpServer
 
   registerAppTool(
     server,
-    'quote_food_order',
+    'propose_reorder',
     {
-      title: 'Quote a food order',
-      description: 'Prepares a dog food order and returns the price and delivery date for the person to approve. Buys nothing.',
+      title: 'Propose a food reorder',
+      description:
+        'Proposes a dog food refill with the exact price, delivery date and an optional tip for the delivery driver, for the person to approve. Buys nothing. ' +
+        'Paid with PayPal only after the person says yes and approves on PayPal.',
       inputSchema: z.object({
         product_id: z.string().optional().describe('Defaults to the food she eats now.'),
         quantity: z.number().int().min(1).max(4).default(1),
+        tip_usd: z.number().min(0).max(20).default(0).describe('Optional tip for the delivery driver, in dollars.'),
       }),
       _meta: { ui: { resourceUri: CARD_URI, visibility: ['model', 'app'] } },
     },
-    async ({ product_id, quantity }) => {
+    async ({ product_id, quantity, tip_usd }) => {
       const now = rt.now();
-      const { action, food } = await rt.withState((s) => ({
-        action: quoteOrder(s, product_id ?? s.food.productId, quantity, now),
-        food: foodProjection(s, now),
-      }));
+      const { action, food, lines } = await rt.withState((s) => {
+        const a = quoteOrder(s, product_id ?? s.food.productId, quantity, now, tip_usd);
+        return { action: a, food: foodProjection(s, now), lines: payLines(s, a) };
+      });
       const p = product(action.productId);
-      const say = `${quantity > 1 ? `${quantity} bags of ` : ''}${p.name}, ${p.sizeLabel}, is $${action.totalUsd.toFixed(2)} and arrives in ${p.deliveryDays} days, before she runs out ${food.runsOutDay}. Shall I place the order?`;
-      return reply(say, { card: 'confirm', action, product: p });
+      const tip = action.tipUsd ? `, plus a $${action.tipUsd.toFixed(2)} tip for the driver` : '';
+      const say = `${quantity > 1 ? `${quantity} bags of ` : ''}${p.name}, ${p.sizeLabel}, is $${(p.priceUsd * quantity).toFixed(2)}${tip}: $${action.totalUsd.toFixed(2)} in all, paid with PayPal. It arrives in ${p.deliveryDays} days, before she runs out ${food.runsOutDay}. Shall I set it up?`;
+      return reply(say, { card: 'confirm', action, product: p, lines });
     },
   );
 
@@ -178,7 +190,7 @@ export function createPawzooServer(rt: Runtime, cardHtmlPath: string): McpServer
     'get_walk_report',
     {
       title: 'Walk report',
-      description: "Checks the dog walker's visit against what the Ring front door camera saw: start, end, minutes versus booked, and the week so far.",
+      description: "Checks the dog walker's visit against what the front door camera saw: start, end, minutes versus booked, and the week so far.",
       inputSchema: z.object({ date: dateArg }),
       annotations: { readOnlyHint: true },
       _meta: CARD_META,
@@ -204,7 +216,7 @@ export function createPawzooServer(rt: Runtime, cardHtmlPath: string): McpServer
     'quote_walk_payment',
     {
       title: 'Quote the walk payment',
-      description: "Prepares payment for a verified walk, with an optional tip, for the person to approve. Pays nothing.",
+      description: 'Prepares payment for a verified walk, with an optional tip for the walker, for the person to approve. Pays nothing. Paid with PayPal only after a yes and their approval on PayPal.',
       inputSchema: z.object({
         walk_id: z.string().optional().describe("Defaults to today's walk."),
         tip_usd: z.number().min(0).max(50).default(0),
@@ -216,7 +228,8 @@ export function createPawzooServer(rt: Runtime, cardHtmlPath: string): McpServer
         const now = rt.now();
         const action = await rt.withState((s) => quoteWalkPayment(s, walk_id ?? `walk-${rt.today()}`, tip_usd, now));
         const total = action.amountUsd + action.tipUsd;
-        return reply(`That's $${total.toFixed(2)} to Leash & Lead${action.tipUsd ? `, including a $${action.tipUsd} tip` : ''}. Shall I pay it?`, { card: 'confirm', action });
+        const lines = await rt.read((s) => payLines(s, action));
+        return reply(`That's $${total.toFixed(2)} to Leash & Lead${action.tipUsd ? `, including a $${action.tipUsd} tip` : ''}, paid with PayPal. Shall I set it up?`, { card: 'confirm', action, lines });
       } catch (err) {
         return fail((err as Error).message);
       }
@@ -281,7 +294,7 @@ export function createPawzooServer(rt: Runtime, cardHtmlPath: string): McpServer
     {
       title: 'Confirm',
       description:
-        'Carries out a quoted order, payment or booking. Call ONLY after the person explicitly says yes to that exact quote, passing its confirmation_id.',
+        'Books a quoted care slot (bookings are paid at the visit). Call ONLY after the person explicitly says yes to that exact quote, passing its confirmation_id. For food orders and walk payments use create_paypal_order instead.',
       inputSchema: z.object({ confirmation_id: z.string() }),
       annotations: { destructiveHint: false, idempotentHint: false },
       _meta: { ui: { resourceUri: CARD_URI, visibility: ['model', 'app'] } },
@@ -308,6 +321,92 @@ export function createPawzooServer(rt: Runtime, cardHtmlPath: string): McpServer
       } catch (err) {
         return fail((err as Error).message);
       }
+    },
+  );
+
+  registerAppTool(
+    server,
+    'create_paypal_order',
+    {
+      title: 'Create the PayPal order',
+      description:
+        'Call ONLY after the person explicitly says yes to a quoted food order or walk payment, passing its confirmation_id. ' +
+        "Creates a PayPal order for exactly the quoted lines and returns PayPal's approval link. Moves no money: the person approves on PayPal, then call capture_paypal_order.",
+      inputSchema: z.object({ confirmation_id: z.string() }),
+      annotations: { destructiveHint: false, idempotentHint: false },
+      _meta: { ui: { resourceUri: CARD_URI, visibility: ['model', 'app'] } },
+    },
+    async ({ confirmation_id }) => {
+      try {
+        const now = rt.now();
+        const { action, lines } = await rt.read((s) => {
+          const a = moneyAction(s, confirmation_id);
+          return { action: a, lines: payLines(s, a) };
+        });
+        const order = await paypal.createOrder(lines, { returnUrl: `${PUBLIC_URL}/paypal/return`, cancelUrl: `${PUBLIC_URL}/paypal/cancel` });
+        const payment = await rt.withState((s) => startPayment(s, moneyAction(s, action.id), { orderId: order.id, approveUrl: order.approveUrl, totalUsd: order.totalUsd }, paypal.mode, now));
+        rt.push({ type: 'state', reason: 'paypal_order' });
+        const say = `I've set up a PayPal order for $${payment.totalUsd.toFixed(2)}. Approve it on PayPal and I'll finish the ${action.kind === 'order' ? 'order' : 'payment'}.`;
+        return reply(say, { card: 'paypal', payment, gateway: paypal.mode });
+      } catch (err) {
+        return fail((err as Error).message);
+      }
+    },
+  );
+
+  registerAppTool(
+    server,
+    'capture_paypal_order',
+    {
+      title: 'Capture the approved PayPal order',
+      description:
+        'Completes a PayPal order after the person approved it on PayPal, and writes the receipt. ' +
+        'Refuses unless PayPal reports the order APPROVED for exactly the quoted total.',
+      inputSchema: z.object({ order_id: z.string().describe('The PayPal order id from create_paypal_order.') }),
+      annotations: { destructiveHint: false, idempotentHint: true },
+      _meta: { ui: { resourceUri: CARD_URI, visibility: ['model', 'app'] } },
+    },
+    async ({ order_id }) => {
+      try {
+        const payment = await rt.read((s) => ({ ...paymentFor(s, order_id) }));
+        if (payment.status === 'captured') return fail('That order is already paid. Ask for the receipt with order_receipt.');
+        if (payment.status === 'cancelled') return fail('That PayPal order was cancelled. Nothing was charged. Ask again for a fresh quote.');
+        const live = await paypal.getOrder(order_id);
+        if (live.status !== 'APPROVED') return fail(`PayPal hasn't been approved yet (status ${live.status}). Approve it on PayPal first; nothing has been charged.`);
+        if (Math.abs(live.totalUsd - payment.totalUsd) > 0.001) return fail(`PayPal's total $${live.totalUsd.toFixed(2)} does not match the approved quote $${payment.totalUsd.toFixed(2)}. Nothing was captured.`);
+        const capture = await paypal.captureOrder(order_id);
+        const now = rt.now();
+        const { receipt, done } = await rt.withState((s) => completePayment(s, order_id, capture, now));
+        rt.push({ type: 'state', reason: done.kind });
+        let say = `Paid with PayPal: $${receipt.totalUsd.toFixed(2)}${receipt.tipUsd ? `, including the $${receipt.tipUsd.toFixed(2)} tip` : ''}.`;
+        if (receipt.food) say += ` ${receipt.food.product} arrives ${weekdayName(receipt.food.arrivesOn)}. At ${receipt.food.dailyCups} cups a day it lasts until ${weekdayName(receipt.food.nextRunsOutOn)}, ${receipt.food.nextRunsOutOn}.`;
+        if (receipt.walk) say += ` ${receipt.walk.walker} is paid for ${weekdayName(receipt.walk.date)}'s walk.`;
+        say += ' The receipt is saved.';
+        return reply(say, { card: 'receipt', receipt });
+      } catch (err) {
+        return fail((err as Error).message);
+      }
+    },
+  );
+
+  registerAppTool(
+    server,
+    'order_receipt',
+    {
+      title: "The pet's receipts",
+      description: "Lists the receipts for the dog's refills and walk payments, newest first: items, tips, PayPal transaction ids and the next predicted run-out.",
+      inputSchema: z.object({ limit: z.number().int().min(1).max(20).default(5) }),
+      annotations: { readOnlyHint: true },
+      _meta: CARD_META,
+    },
+    async ({ limit }) => {
+      const { receipts, pet } = await rt.read((s) => ({ receipts: [...s.receipts].reverse().slice(0, limit), pet: s.pet.name }));
+      if (!receipts.length) return reply(`No receipts for ${pet} yet.`, { card: 'receipts', pet, receipts });
+      const spent = receipts.reduce((a, r) => a + r.totalUsd, 0);
+      const tips = receipts.reduce((a, r) => a + r.tipUsd, 0);
+      const last = receipts[0];
+      const say = `${receipts.length} receipt${receipts.length === 1 ? '' : 's'} for ${pet}: $${spent.toFixed(2)} in all, $${tips.toFixed(2)} of it tips. The latest is ${last.title.toLowerCase()}, $${last.totalUsd.toFixed(2)}.`;
+      return reply(say, { card: 'receipts', pet, receipts });
     },
   );
 

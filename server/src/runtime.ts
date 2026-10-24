@@ -12,7 +12,8 @@ export type Push =
   | AgentNotice
   | { type: 'cast'; target: 'day_reel' | 'moment' | 'alert' | 'home'; eventId?: string; date?: string }
   | { type: 'clock'; now: string; local: string; pinned: boolean }
-  | { type: 'state'; reason: string };
+  | { type: 'state'; reason: string }
+  | { type: 'paypal'; status: 'approved' | 'cancelled'; orderId: string };
 
 export interface RuntimeOptions {
   store: Store;
@@ -90,7 +91,10 @@ export class Runtime {
         loaded = await this.opts.store.load('hh-rivera');
       }
       // A state saved on an earlier day would show yesterday's walks as today's, so start that day fresh.
-      this.state = loaded && loaded.seededFor === this.demoDate ? loaded : initialState(this.demoDate);
+      // Receipts are the payment history, so they carry over into a fresh day.
+      this.state = loaded && loaded.seededFor === this.demoDate ? loaded : { ...initialState(this.demoDate), receipts: loaded?.receipts ?? [] };
+      this.state.payments ??= [];
+      this.state.receipts ??= [];
     }
     return this.state;
   }
@@ -159,7 +163,7 @@ export class Runtime {
   async reset(): Promise<void> {
     await this.withState((s) => {
       const fresh = initialState(this.demoDate);
-      Object.assign(s, fresh);
+      Object.assign(s, { ...fresh, receipts: s.receipts });
     });
     this.recordings.clear();
     this.push({ type: 'state', reason: 'reset' });

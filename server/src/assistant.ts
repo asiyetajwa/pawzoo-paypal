@@ -19,7 +19,7 @@ export interface AssistantPlan {
 }
 
 /** Values the browser fills in from earlier turns: the quote awaiting a yes, the last moments found, and so on. */
-export const PLACEHOLDERS = ['$last_confirmation', '$first_moment', '$recommended_slot', '$open_alert', '$last_walk'] as const;
+export const PLACEHOLDERS = ['$last_confirmation', '$first_moment', '$recommended_slot', '$open_alert', '$last_walk', '$paypal_order'] as const;
 
 const YES = /^(yes|yeah|yep|yup|sure|ok(ay)?|do it|confirm|please do|go ahead|sounds good|book it|pay it|order it)\b/i;
 
@@ -41,8 +41,10 @@ export function planWithRules(utterance: string): AssistantPlan {
     return plan([{ name: 'resolve_alert', arguments: { alert_id: '$open_alert' } }]);
   if (/alert|is (she|biscuit) (ok|okay|safe)|where is/i.test(u)) return plan([{ name: 'get_alerts', arguments: {} }]);
 
+  if (/receipts?|what did (we|i) (pay|spend)|how much (have|did) (we|i) (spent|spend|paid)/i.test(u)) return plan([{ name: 'order_receipt', arguments: { limit: 5 } }]);
+  if (/\b(i )?(approved|paid) (it )?(on|in|with) paypal|approved it\b|done on paypal/i.test(u)) return plan([{ name: 'capture_paypal_order', arguments: { order_id: '$paypal_order' } }]);
   if (/food|kibble|run(s|ning)? out|bag/i.test(u) || /\b(re)?order\b/i.test(u)) {
-    if (/\b(re)?order|buy|get more|another bag/i.test(u)) return plan([{ name: 'quote_food_order', arguments: { quantity: 1 } }]);
+    if (/\b(re)?order|buy|get more|another bag/i.test(u)) return plan([{ name: 'propose_reorder', arguments: { quantity: 1, tip_usd: /tip/i.test(u) ? tipFrom(u) : 0 } }]);
     return plan([{ name: 'check_food', arguments: {} }]);
   }
 
@@ -75,8 +77,10 @@ interface McpToolSummary {
 
 const SYSTEM = `You are the family's home assistant, using Pawzoo for their dog, Biscuit.
 Choose the Pawzoo tools that answer the person. Call tools; do not answer from your own knowledge.
-Money or bookings: first call the quote_ tool; call confirm_action only when the person says yes, with confirmation_id "$last_confirmation".
-To act on earlier results use these placeholders exactly: "$first_moment" (an event_id), "$recommended_slot" (a slot_id), "$open_alert" (an alert_id), "$last_walk" (a walk_id).
+Pawzoo never pays on its own. Food: call propose_reorder (with tip_usd if the person offers a tip for the driver). Walk payments: quote_walk_payment. Bookings: quote_booking.
+When the person says yes to a food order or walk payment, call create_paypal_order with confirmation_id "$last_confirmation"; for a booking, call confirm_action with it.
+Never call capture_paypal_order unless the person says they approved it on PayPal; then pass order_id "$paypal_order". For receipts or past spending, call order_receipt.
+To act on earlier results use these placeholders exactly: "$first_moment" (an event_id), "$recommended_slot" (a slot_id), "$open_alert" (an alert_id), "$last_walk" (a walk_id), "$paypal_order" (a PayPal order id).
 Use at most two tools. Never give medical or veterinary advice.`;
 
 /** MCP tool schemas carry a "$schema" keyword the Messages API does not need; the rest passes through. */

@@ -182,5 +182,7 @@ export function initialState(date: string, timeZone = TIME_ZONE): State {
       { id: 'fact-1', at: zonedToUtc(addDays(date, -20), '19:00', timeZone).toISOString(), text: 'Biscuit gets anxious at the groomer; Saturday mornings are calmer.' },
     ],
     pending: [],
+    payments: [],
+    receipts: [],
   };
 }

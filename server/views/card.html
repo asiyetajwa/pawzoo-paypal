@@ -51,6 +51,14 @@
   .btn.quiet { background: var(--band); color: var(--ink); padding: 9px 16px; }
   .btn:disabled { opacity: .55; cursor: progress; }
   .btn:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .lines { list-style: none; margin: 12px 0 0; padding: 0; display: grid; border-top: 1px solid var(--line); }
+  .lines li { display: flex; justify-content: space-between; gap: 16px; padding: 10px 2px; border-bottom: 1px solid var(--line); }
+  .lines li b { font-weight: 500; }
+  .lines li span { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .lines li.total b, .lines li.total span { font-weight: 600; font-size: 15px; }
+  .amt { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  code { font: 11px/1.4 ui-monospace, Menlo, Consolas, monospace; background: var(--band); padding: 1px 5px; border-radius: 5px; }
+  .facts.small li { grid-template-columns: 140px 1fr; }
   footer { display: none; }
 </style>
 </head>
