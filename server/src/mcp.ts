@@ -31,6 +31,9 @@ import type { PayPalGateway } from './paypal.js';
 import type { Runtime } from './runtime.js';
 import { clockLabel, localParts, weekdayName } from './time.js';
 
+/** "Monday, November 30" from 2026-11-30. */
+const longDate = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' });
+
 /** A caption as the end of a sentence: one closing full stop, never two. */
 const sentence = (caption: string) => `${caption.replace(/[.!?]+$/, '')}.`;
 
@@ -379,7 +382,7 @@ export function createPawzooServer(rt: Runtime, cardHtmlPath: string, paypal: Pa
         const { receipt, done } = await rt.withState((s) => completePayment(s, order_id, capture, now));
         rt.push({ type: 'state', reason: done.kind });
         let say = `Paid with PayPal: $${receipt.totalUsd.toFixed(2)}${receipt.tipUsd ? `, including the $${receipt.tipUsd.toFixed(2)} tip` : ''}.`;
-        if (receipt.food) say += ` ${receipt.food.product} arrives ${weekdayName(receipt.food.arrivesOn)}. At ${receipt.food.dailyCups} cups a day it lasts until ${weekdayName(receipt.food.nextRunsOutOn)}, ${receipt.food.nextRunsOutOn}.`;
+        if (receipt.food) say += ` ${receipt.food.product} arrives ${weekdayName(receipt.food.arrivesOn)}. At ${receipt.food.dailyCups} cups a day, her next bag should run out ${longDate(receipt.food.nextRunsOutOn)}.`;
         if (receipt.walk) say += ` ${receipt.walk.walker} is paid for ${weekdayName(receipt.walk.date)}'s walk.`;
         say += ' The receipt is saved.';
         return reply(say, { card: 'receipt', receipt });
@@ -405,7 +408,7 @@ export function createPawzooServer(rt: Runtime, cardHtmlPath: string, paypal: Pa
       const spent = receipts.reduce((a, r) => a + r.totalUsd, 0);
       const tips = receipts.reduce((a, r) => a + r.tipUsd, 0);
       const last = receipts[0];
-      const say = `${receipts.length} receipt${receipts.length === 1 ? '' : 's'} for ${pet}: $${spent.toFixed(2)} in all, $${tips.toFixed(2)} of it tips. The latest is ${last.title.toLowerCase()}, $${last.totalUsd.toFixed(2)}.`;
+      const say = `${receipts.length} receipt${receipts.length === 1 ? '' : 's'} for ${pet}: $${spent.toFixed(2)} in all, $${tips.toFixed(2)} of it tips. The latest: ${last.title}, $${last.totalUsd.toFixed(2)}.`;
       return reply(say, { card: 'receipts', pet, receipts });
     },
   );

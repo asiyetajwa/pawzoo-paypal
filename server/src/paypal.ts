@@ -91,7 +91,9 @@ export class ToolkitGateway implements PayPalGateway {
       returnUrl: urls.returnUrl,
       cancelUrl: urls.cancelUrl,
     });
-    return toOrder(raw);
+    // PayPal's create response is the minimal representation (no amounts): read the order back to check its total.
+    const full = toOrder(await this.call<RawOrder>('get_order', { id: raw.id }));
+    return { ...full, approveUrl: toOrder(raw).approveUrl ?? full.approveUrl };
   }
 
   async getOrder(id: string): Promise<PayPalOrder> {
