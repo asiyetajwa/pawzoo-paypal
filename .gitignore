@@ -1,0 +1,17 @@
+node_modules/
+dist/
+dist-views/
+data/
+*.log
+.env
+web/dist/
+tv/android/
+tv/node_modules/
+animation/out/
+animation/node_modules/
+demo/node_modules/
+demo/out/
+demo/public/music/
+demo/public/voiceover/
+demo/public/sfx/
+tv/.expo/

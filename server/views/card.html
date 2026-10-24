@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pawzoo</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #1f1b2e; --muted: #8a8698; --band: #f4f4f7; --line: #ebebf0; --press: #1f1b2e; --press-ink: #ffffff;
+    --accent: #7c3aed; --warn: #e11d48; --warn-bg: #ffe4e8; --ok: #14b8a6; color-scheme: light;
+  }
+  :root[data-theme="dark"] {
+    --ink: #f4f2fa; --muted: #9b97ab; --band: #221f2d; --line: #2a2736; --press: #f4f2fa; --press-ink: #191722;
+    --accent: #a78bfa; --warn: #fb7185; --warn-bg: #3b1520; --ok: #2dd4bf; color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: transparent; color: var(--ink); font: 14px/1.45 "Outfit", "Segoe UI", system-ui, sans-serif; }
+  .card { padding: 4px 2px 6px; }
+  header { display: block; }
+  header h1 { margin: 2px 0 0; font-size: 16px; font-weight: 500; line-height: 1.25; }
+  .eyebrow { margin: 0; color: var(--muted); font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: .16em; }
+  .muted { color: var(--muted); margin: 2px 0 0; }
+  .small { font-size: 11px; }
+  .facts { list-style: none; margin: 12px 0 0; padding: 0; display: grid; }
+  .facts li { display: grid; grid-template-columns: 96px 1fr; gap: 12px; align-items: baseline; padding: 10px 12px; border-radius: 12px; }
+  .facts li:nth-child(odd) { background: var(--band); }
+  .facts b { color: var(--muted); font-weight: 500; font-size: 10px; text-transform: uppercase; letter-spacing: .14em; }
+  .facts li.warn { color: var(--warn); }
+  .alert { margin: 10px 0 0; padding: 10px 12px; border-radius: 12px; background: var(--warn-bg); color: var(--warn); font-weight: 600; }
+  .strip { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(104px, 1fr); gap: 10px; overflow-x: auto; margin-top: 12px; padding-bottom: 4px; scrollbar-width: thin; }
+  .moment { margin: 0; }
+  .thumb { position: relative; aspect-ratio: 16 / 10; border-radius: 14px; background: var(--band); overflow: hidden; }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .thumb.small { width: 64px; flex: none; }
+  .time { position: absolute; left: 6px; bottom: 6px; background: rgba(31,27,46,.6); color: #fff; font-size: 10px; padding: 1px 6px; border-radius: 6px; }
+  figcaption { font-size: 11px; margin-top: 4px; color: var(--muted); }
+  .meter { height: 8px; border-radius: 999px; background: var(--band); margin-top: 14px; overflow: hidden; }
+  .meter span { display: block; height: 100%; background: var(--ok); border-radius: inherit; }
+  .meter.low span { background: var(--warn); }
+  .rows { list-style: none; margin: 12px 0 0; padding: 0; display: grid; }
+  .row { display: flex; gap: 12px; align-items: center; padding: 10px 12px; border-radius: 12px; }
+  .row:nth-child(odd) { background: var(--band); }
+  .row.pick .grow b { color: var(--accent); }
+  .grow { flex: 1; min-width: 0; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; align-items: center; }
+  .btn { font: inherit; font-weight: 500; border-radius: 999px; cursor: pointer; border: 0; display: inline-flex; align-items: center; gap: 10px; }
+  .btn.primary { background: var(--press); color: var(--press-ink); padding: 6px 6px 6px 16px; }
+  .btn.primary::after { content: ""; width: 28px; height: 28px; border-radius: 50%; background: var(--press-ink) no-repeat center / 14px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%231f1b2e' d='M5 11h10.17l-4.58-4.59L12 5l7 7-7 7-1.41-1.41L15.17 13H5z'/%3E%3C/svg%3E"); }
+  :root[data-theme="dark"] .btn.primary::after { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23f4f2fa' d='M5 11h10.17l-4.58-4.59L12 5l7 7-7 7-1.41-1.41L15.17 13H5z'/%3E%3C/svg%3E"); }
+  .btn.quiet { background: var(--band); color: var(--ink); padding: 9px 16px; }
+  .btn:disabled { opacity: .55; cursor: progress; }
+  .btn:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  footer { display: none; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="module">/*__CARD_JS__*/</script>
+</body>
+</html>

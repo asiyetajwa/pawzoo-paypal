@@ -1,0 +1,19 @@
+{
+  "name": "@pawzoo/web",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Pawzoo Alexa+ simulator (a real MCP client) and the TV web preview",
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc -p . --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/client": "2.3.1",
+    "@modelcontextprotocol/ext-apps": "2.0.3"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "typescript": "5.9"
+  }
+}

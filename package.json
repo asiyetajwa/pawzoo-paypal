@@ -1,0 +1,21 @@
+{
+  "name": "pawzoo",
+  "private": true,
+  "license": "MIT",
+  "description": "Pawzoo: your Ring cameras see your dog's day, Alexa+ acts on it, Fire TV shows it.",
+  "scripts": {
+    "setup": "npm --prefix server ci && npm --prefix web ci && npm run build",
+    "build": "npm --prefix web run build && npm --prefix server run build",
+    "start": "npm --prefix server start",
+    "start:tv": "npm --prefix server start -- --lan",
+    "dev": "npm --prefix web run build && npm --prefix server run dev",
+    "test": "npm --prefix server test",
+    "typecheck": "npm --prefix server run typecheck && npm --prefix web run typecheck",
+    "placeholders": "node animation/placeholders.mjs",
+    "check:aws": "npm --prefix server run check:aws",
+    "stop": "node scripts/stop.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pawzoo clay studio</title>
+<style>
+  html, body { margin: 0; background: #efeae4; }
+  .stage { position: relative; width: 1280px; height: 720px; overflow: hidden; }
+  canvas { display: block; width: 1280px; height: 720px; }
+  .vignette { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0) 55%, rgba(60,45,35,.18) 100%); }
+  .hud { position: absolute; left: 24px; right: 24px; top: 22px; display: flex; justify-content: space-between; font: 600 20px/1 "Outfit", "Segoe UI", Arial, sans-serif; color: #fff; }
+  .hud span { display: inline-flex; align-items: center; gap: 10px; background: rgba(42,38,36,.5); padding: 12px 18px; border-radius: 999px; }
+  .rec { width: 12px; height: 12px; border-radius: 50%; background: #ff5c7a; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "/node_modules/three/build/three.module.js", "three/addons/": "/node_modules/three/examples/jsm/" } }
+</script>
+</head>
+<body>
+<div class="stage" id="stage">
+  <canvas id="c" width="1280" height="720"></canvas>
+  <div class="vignette"></div>
+  <div class="hud" id="hud"><span><i class="rec"></i><b id="cam"></b></span><span id="time"></span></div>
+</div>
+<script type="module" src="./clay.js"></script>
+</body>
+</html>
